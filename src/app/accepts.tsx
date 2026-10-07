@@ -118,7 +118,9 @@ function AcceptCard({ request }: { request: Request }) {
   return (
     <View style={[styles.card, isChosen && styles.cardChosen]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.medicineName}>{request.medicineName}</Text>
+        <Text style={styles.medicineName}>
+          {request.medicineName || "Prescription uploaded"}
+        </Text>
         <View style={[styles.statusBadge, { backgroundColor: bg }]}>
           <Text style={[styles.statusText, { color }]} numberOfLines={1}>
             {label}

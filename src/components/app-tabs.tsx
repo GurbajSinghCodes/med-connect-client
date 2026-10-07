@@ -20,11 +20,9 @@ const TAB_COLORS = {
 };
 
 export default function AppTabs() {
-  const { isGuest, isPharmacy, isLoading } = useAuth();
+  const { isGuest, isPharmacy, isLoading, openRequestCount } = useAuth();
   const router = useRouter();
 
-  // Role key — changes when the visible tab set changes.
-  // Used both to force a navigator remount AND to detect role changes.
   const roleKey = isLoading
     ? "loading"
     : isPharmacy
@@ -37,14 +35,10 @@ export default function AppTabs() {
 
   useEffect(() => {
     if (isLoading) return;
-
-    // First time we know the role — just record it, don't redirect
     if (prevRoleRef.current === null) {
       prevRoleRef.current = roleKey;
       return;
     }
-
-    // Role actually changed — bounce to a tab that exists in the new set
     if (prevRoleRef.current !== roleKey) {
       prevRoleRef.current = roleKey;
       router.replace("/");
@@ -67,16 +61,29 @@ export default function AppTabs() {
           paddingTop: 6,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: "600",
           marginBottom: 2,
         },
       }}
     >
+      {/* ============ VISIBLE TABS ============ */}
+
       <Tabs.Screen
         name="index"
         options={{
           title: isPharmacy ? "Requests" : "Home",
+          tabBarBadge:
+            isPharmacy && openRequestCount > 0 ? openRequestCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: "#c8372d",
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: "800",
+            minWidth: 18,
+            height: 18,
+            lineHeight: 16,
+          },
           tabBarIcon: ({ focused, size }) => (
             <Ionicons
               name={
@@ -113,8 +120,19 @@ export default function AppTabs() {
       <Tabs.Screen
         name="my-requests"
         options={{
-          title: "My Requests",
+          title: "Requests",
           href: isPharmacy ? null : "/my-requests",
+          tabBarBadge:
+            !isPharmacy && openRequestCount > 0 ? openRequestCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: "#c8372d",
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: "800",
+            minWidth: 18,
+            height: 18,
+            lineHeight: 16,
+          },
           tabBarIcon: ({ focused, size }) => (
             <Ionicons
               name={focused ? "document-text" : "document-text-outline"}
@@ -124,7 +142,6 @@ export default function AppTabs() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="accepts"
         options={{
@@ -184,6 +201,12 @@ export default function AppTabs() {
           ),
         }}
       />
+
+      {/* ============ HIDDEN ROUTES (not tabs) ============ */}
+
+      <Tabs.Screen name="pharmacies/[id]" options={{ href: null }} />
+      <Tabs.Screen name="requests/[id]" options={{ href: null }} />
+      <Tabs.Screen name="forgot-password" options={{ href: null }} />
     </Tabs>
   );
 }

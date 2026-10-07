@@ -1,4 +1,4 @@
-import { getToken } from "./api";
+import { getDeviceId, getToken } from "./api";
 import { API_URL } from "./config";
 
 interface AuthParams {
@@ -11,9 +11,14 @@ interface AuthParams {
 
 async function fetchAuth(): Promise<AuthParams> {
   const authToken = await getToken();
-  const res = await fetch(`${API_URL}/api/imagekit/auth`, {
-    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-  });
+  const deviceId = await getDeviceId();
+
+  const headers: Record<string, string> = {
+    "X-Device-Id": deviceId,
+  };
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+  const res = await fetch(`${API_URL}/api/imagekit/auth`, { headers });
 
   if (!res.ok) {
     const text = await res.text();
@@ -25,13 +30,15 @@ async function fetchAuth(): Promise<AuthParams> {
 export async function uploadToImageKit(uri: string): Promise<string> {
   const auth = await fetchAuth();
 
+  // Read local file as Blob — the only reliable path on Android SDK 53+
+  const fileRes = await fetch(uri);
+  const blob = await fileRes.blob();
+
+  const fileName = `prescription_${Date.now()}.jpg`;
+
   const formData = new FormData();
-  formData.append("file", {
-    uri,
-    type: "image/jpeg",
-    name: `prescription_${Date.now()}.jpg`,
-  } as any);
-  formData.append("fileName", `prescription_${Date.now()}.jpg`);
+  formData.append("file", blob, fileName);
+  formData.append("fileName", fileName);
   formData.append("publicKey", auth.publicKey);
   formData.append("signature", auth.signature);
   formData.append("expire", String(auth.expire));

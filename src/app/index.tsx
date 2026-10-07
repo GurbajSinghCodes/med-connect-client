@@ -1,10 +1,11 @@
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -21,8 +22,23 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 import { uploadToImageKit } from "../lib/imagekit";
-
 const POLL_INTERVAL_MS = 5000;
+
+const C = {
+  ink: "#0f1419",
+  slate: "#4a5568",
+  muted: "#8b95a5",
+  mist: "#f7f8fa",
+  paper: "#ffffff",
+  accent: "#c8372d",
+  accentSoft: "#fef2f1",
+  signal: "#1a7f5a",
+  signalSoft: "#ecfdf5",
+  warning: "#b45309",
+  warningSoft: "#fef7ed",
+  line: "#e5e7eb",
+  lineFaint: "#f0f1f3",
+};
 
 type Urgency = "general" | "urgent";
 
@@ -31,8 +47,8 @@ export default function HomeScreen() {
 
   if (isLoading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={s.center}>
+        <ActivityIndicator color={C.accent} />
       </View>
     );
   }
@@ -41,17 +57,16 @@ export default function HomeScreen() {
   return <RequestForm />;
 }
 
-// ==================== PATIENT / GUEST SIDE ====================
+// ==================== REQUEST FORM ====================
 
 function RequestForm() {
-  const { user } = useAuth();
+  const { user, setOpenRequestCount } = useAuth();
 
   const [medicineName, setMedicineName] = useState("");
   const [description, setDescription] = useState("");
   const [urgency, setUrgency] = useState<Urgency>("general");
-
   const [phone, setPhone] = useState(user?.phone ?? "");
-
+  const [resetting, setResetting] = useState(false);
   const [coords, setCoords] = useState<{
     longitude: number;
     latitude: number;
@@ -63,13 +78,66 @@ function RequestForm() {
   const [uploading, setUploading] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [lastRequestId, setLastRequestId] = useState<string | null>(null);
-
-  // Sync phone when the logged-in user changes (e.g. logs in mid-session)
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-20)).current;
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (user?.phone) setPhone(user.phone);
   }, [user?.phone]);
+  const handleReset = async () => {
+    setResetting(true);
+    setMedicineName("");
+    setDescription("");
+    setUrgency("general");
+    setImages([]);
+    setAddress("");
+    setCoords(null);
+    setToastVisible(false); // was: setLastRequestId(null)
+    if (!user) setPhone("");
+    await new Promise((r) => setTimeout(r, 400));
+    setResetting(false);
+  };
+  const showToast = () => {
+    setToastVisible(true);
+    toastOpacity.setValue(0);
+    toastTranslateY.setValue(-20);
 
+    Animated.parallel([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(toastTranslateY, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(toastTranslateY, {
+          toValue: -20,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setToastVisible(false));
+    }, 3000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
   const handleUseLocation = async () => {
     setLocating(true);
     try {
@@ -132,8 +200,14 @@ function RequestForm() {
   };
 
   const handleSubmit = async () => {
-    if (!medicineName.trim()) {
-      Alert.alert("Missing info", "Enter the medicine name.");
+    const hasName = medicineName.trim().length > 0;
+    const hasImage = images.length > 0;
+
+    if (!hasName && !hasImage) {
+      Alert.alert(
+        "Missing info",
+        "Enter a medicine name or upload a prescription photo.",
+      );
       return;
     }
     if (!coords) {
@@ -159,16 +233,16 @@ function RequestForm() {
         contactPhone: phone,
         contactCountryCode: user?.countryCode || "+91",
       });
-      setLastRequestId(req._id);
+
+      // Optimistically bump the badge — the request is now open
+      setOpenRequestCount((n) => n + 1);
+
+      showToast();
       setMedicineName("");
       setDescription("");
       setUrgency("general");
       setImages([]);
       if (!user) setPhone("");
-      Alert.alert(
-        "Request submitted",
-        "Nearby pharmacies are being notified. Check My Requests for updates.",
-      );
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Submission failed";
       Alert.alert("Error", msg);
@@ -178,188 +252,217 @@ function RequestForm() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
+    <View style={s.flex}>
+      <KeyboardAvoidingView
+        style={s.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.title}>Request Medicine</Text>
-        <Text style={styles.subtitle}>
-          We'll notify nearby pharmacies that might have it.
-        </Text>
+        <ScrollView
+          contentContainerStyle={s.formScroll}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={resetting}
+              onRefresh={handleReset}
+              tintColor={C.accent}
+              colors={[C.accent]}
+            />
+          }
+        >
+          <View style={s.heroBlock}>
+            <Text style={s.heroKicker}>Request</Text>
+            <Text style={s.heroTitle}>What do you need?</Text>
+            <Text style={s.heroSub}>
+              We'll ping pharmacies near you. First to respond wins your call.
+            </Text>
+          </View>
 
-        <Text style={styles.label}>Medicine name *</Text>
-        <TextInput
-          style={styles.input}
-          value={medicineName}
-          onChangeText={setMedicineName}
-          placeholder="e.g. Insulin, Paracetamol"
-          placeholderTextColor="#999"
-          editable={!submitting}
-        />
-
-        <Text style={styles.label}>Contact phone *</Text>
-        <View style={styles.phoneContainer}>
-          <Text style={styles.phonePrefix}>+91</Text>
+          {/* Medicine name */}
+          <Text style={s.fieldLabel}>Medicine</Text>
           <TextInput
-            style={styles.phoneInput}
-            value={phone}
-            onChangeText={(t) => setPhone(t.replace(/\D/g, "").slice(0, 10))}
-            placeholder="98765 43210"
-            placeholderTextColor="#999"
-            keyboardType="phone-pad"
-            maxLength={10}
+            style={s.fieldInput}
+            value={medicineName}
+            onChangeText={setMedicineName}
+            placeholder="Insulin, Paracetamol…"
+            placeholderTextColor={C.muted}
             editable={!submitting}
           />
-        </View>
-        <Text style={styles.helpText}>
-          {user
-            ? "Pharmacies will call this number to confirm."
-            : "Pharmacies will call this number to reach you."}
-        </Text>
 
-        <Text style={styles.label}>Notes (optional)</Text>
-        <TextInput
-          style={[styles.input, styles.multiline]}
-          value={description}
-          onChangeText={setDescription}
-          placeholder="Dosage, brand, quantity…"
-          placeholderTextColor="#999"
-          multiline
-          numberOfLines={3}
-          editable={!submitting}
-        />
+          {/* Notes */}
+          <Text style={s.fieldLabel}>Notes</Text>
+          <TextInput
+            style={[s.fieldInput, s.fieldMultiline]}
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Dosage, brand, quantity — anything the pharmacy needs"
+            placeholderTextColor={C.muted}
+            multiline
+            numberOfLines={3}
+            editable={!submitting}
+          />
 
-        <Text style={styles.label}>Prescription (optional)</Text>
-        <Text style={styles.helpText}>
-          Upload a photo if you have a doctor's prescription.
-        </Text>
+          {/* Prescription */}
+          <Text style={s.fieldLabel}>Prescription</Text>
+          <Text style={s.fieldHint}>
+            Photo of a doctor's note works too — name not required if you
+            upload.
+          </Text>
 
-        <View style={styles.imageRow}>
-          {images.map((url, i) => (
-            <View key={i} style={styles.imageThumbWrap}>
-              <Image source={{ uri: url }} style={styles.imageThumb} />
-              <Pressable
-                style={styles.imageRemove}
-                onPress={() =>
-                  setImages((prev) => prev.filter((_, idx) => idx !== i))
-                }
-                disabled={submitting}
+          <View style={s.imageRow}>
+            {images.map((url, i) => (
+              <View key={i} style={s.imageThumbWrap}>
+                <Image source={{ uri: url }} style={s.imageThumb} />
+                <Pressable
+                  style={s.imageRemove}
+                  onPress={() =>
+                    setImages((prev) => prev.filter((_, idx) => idx !== i))
+                  }
+                  disabled={submitting}
+                >
+                  <Text style={s.imageRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            <Pressable
+              style={s.imageAddBtn}
+              onPress={handlePickImage}
+              disabled={uploading || submitting}
+            >
+              {uploading ? (
+                <ActivityIndicator color={C.accent} />
+              ) : (
+                <>
+                  <Text style={s.imageAddPlus}>+</Text>
+                  <Text style={s.imageAddLabel}>Photo</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Urgency segmented control */}
+          <Text style={s.fieldLabel}>Priority</Text>
+          <View style={s.segment}>
+            <Pressable
+              style={[
+                s.segmentItem,
+                urgency === "general" && s.segmentItemActive,
+              ]}
+              onPress={() => setUrgency("general")}
+              disabled={submitting}
+            >
+              <Text
+                style={[
+                  s.segmentText,
+                  urgency === "general" && s.segmentTextActive,
+                ]}
               >
-                <Text style={styles.imageRemoveText}>×</Text>
-              </Pressable>
-            </View>
-          ))}
+                General
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                s.segmentItem,
+                urgency === "urgent" && s.segmentItemActiveUrgent,
+              ]}
+              onPress={() => setUrgency("urgent")}
+              disabled={submitting}
+            >
+              <Text
+                style={[
+                  s.segmentText,
+                  urgency === "urgent" && s.segmentTextActive,
+                ]}
+              >
+                Urgent
+              </Text>
+            </Pressable>
+          </View>
 
+          {/* Phone */}
+          <Text style={s.fieldLabel}>Your phone *</Text>
+          <View style={s.phoneField}>
+            <Text style={s.phonePrefix}>+91</Text>
+            <View style={s.phoneDivider} />
+            <TextInput
+              style={s.phoneInput}
+              value={phone}
+              onChangeText={(t) => setPhone(t.replace(/\D/g, "").slice(0, 10))}
+              placeholder="98765 43210"
+              placeholderTextColor={C.muted}
+              keyboardType="phone-pad"
+              maxLength={10}
+              editable={!submitting}
+            />
+          </View>
+          <Text style={s.fieldHint}>
+            Pharmacies will call this number if they have your medicine.
+          </Text>
+
+          {/* Location */}
+          <Text style={s.fieldLabel}>Pickup location</Text>
           <Pressable
-            style={styles.imageAddBtn}
-            onPress={handlePickImage}
-            disabled={uploading || submitting}
+            style={[s.locationBtn, (submitting || locating) && s.btnDisabled]}
+            onPress={handleUseLocation}
+            disabled={submitting || locating}
           >
-            {uploading ? (
-              <ActivityIndicator color="#007aff" />
+            {locating ? (
+              <ActivityIndicator color={C.accent} />
             ) : (
-              <Text style={styles.imageAddText}>+ Add</Text>
+              <>
+                <Text style={s.locationIcon}>◎</Text>
+                <Text style={s.locationText}>
+                  {coords ? "Location set" : "Use my current location"}
+                </Text>
+              </>
             )}
           </Pressable>
-        </View>
 
-        <Text style={styles.label}>Urgency</Text>
-        <View style={styles.urgencyRow}>
-          <Pressable
-            style={[
-              styles.urgencyBtn,
-              urgency === "general" && styles.urgencyActive,
-            ]}
-            onPress={() => setUrgency("general")}
-            disabled={submitting}
-          >
-            <Text
-              style={[
-                styles.urgencyText,
-                urgency === "general" && styles.urgencyTextActive,
-              ]}
-            >
-              General
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.urgencyBtn,
-              urgency === "urgent" && styles.urgencyActive,
-            ]}
-            onPress={() => setUrgency("urgent")}
-            disabled={submitting}
-          >
-            <Text
-              style={[
-                styles.urgencyText,
-                urgency === "urgent" && styles.urgencyTextActive,
-              ]}
-            >
-              Urgent
-            </Text>
-          </Pressable>
-        </View>
-
-        <Text style={styles.label}>Your location *</Text>
-        <Pressable
-          style={[
-            styles.locationBtn,
-            (submitting || locating) && styles.btnDisabled,
-          ]}
-          onPress={handleUseLocation}
-          disabled={submitting || locating}
-        >
-          {locating ? (
-            <ActivityIndicator color="#007aff" />
-          ) : (
-            <Text style={styles.locationBtnText}>
-              {coords ? "Update location" : "Use my current location"}
-            </Text>
+          {coords && (
+            <View style={s.locationCard}>
+              <Text style={s.locationCardLabel}>Confirmed</Text>
+              <Text style={s.locationCardAddress} numberOfLines={2}>
+                {address || "Current location"}
+              </Text>
+              <Text style={s.locationCardCoords}>
+                {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}
+              </Text>
+            </View>
           )}
-        </Pressable>
 
-        {coords && (
-          <View style={styles.locationBox}>
-            <Text style={styles.locationOk}>
-              ✓ {address || "Location captured"}
-            </Text>
-            <Text style={styles.locationCoords}>
-              {coords.latitude.toFixed(4)}, {coords.longitude.toFixed(4)}
-            </Text>
-          </View>
-        )}
+          <Pressable
+            style={[s.submitBtn, (submitting || !coords) && s.btnDisabled]}
+            onPress={handleSubmit}
+            disabled={submitting || !coords}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={s.submitText}>Send request</Text>
+            )}
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-        <Pressable
+      {toastVisible && (
+        <Animated.View
           style={[
-            styles.submitBtn,
-            (submitting || !coords) && styles.btnDisabled,
+            s.toast,
+            {
+              opacity: toastOpacity,
+              transform: [{ translateY: toastTranslateY }],
+            },
           ]}
-          onPress={handleSubmit}
-          disabled={submitting || !coords}
+          pointerEvents="none"
         >
-          {submitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.submitText}>Submit request</Text>
-          )}
-        </Pressable>
-
-        {lastRequestId && (
-          <View style={styles.successBox}>
-            <Text style={styles.successTitle}>Request submitted</Text>
-            <Text style={styles.successId}>ID: {lastRequestId.slice(-6)}</Text>
-            <Text style={styles.successHint}>
-              Check "My Requests" to see pharmacy responses.
-            </Text>
+          <Text style={s.toastIcon}>✓</Text>
+          <View style={s.toastTextWrap}>
+            <Text style={s.toastTitle}>Request sent</Text>
+            <Text style={s.toastSub}>Pharmacies nearby are being notified</Text>
           </View>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </Animated.View>
+      )}
+    </View>
   );
 }
 
@@ -371,17 +474,19 @@ function IncomingRequests() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
-
+  const { setOpenRequestCount } = useAuth();
   const fetchRequests = useCallback(async () => {
     try {
       setError(null);
       const list = await api.getNearbyRequests();
-      setRequests(list.filter((r) => r.status === "open"));
+      const open = list.filter((r) => r.status === "open");
+      setRequests(open);
+      setOpenRequestCount(open.length);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Failed to load";
       setError(msg);
     }
-  }, []);
+  }, [setOpenRequestCount]);
 
   useEffect(() => {
     (async () => {
@@ -409,10 +514,6 @@ function IncomingRequests() {
     try {
       await api.markAvailable(requestId);
       await fetchRequests();
-      Alert.alert(
-        "Marked as available",
-        "The patient will see your pharmacy in their list.",
-      );
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Action failed";
       Alert.alert("Error", msg);
@@ -423,29 +524,44 @@ function IncomingRequests() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={s.center}>
+        <ActivityIndicator color={C.accent} />
       </View>
     );
   }
+
+  const openCount = requests.length;
 
   return (
     <FlatList
       data={requests}
       keyExtractor={(r) => r._id}
-      contentContainerStyle={
-        requests.length === 0 ? styles.emptyList : styles.list
-      }
+      contentContainerStyle={requests.length === 0 ? s.emptyList : s.list}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={C.accent}
+        />
+      }
+      ListHeaderComponent={
+        openCount > 0 ? (
+          <View style={s.listHeader}>
+            <Text style={s.listHeaderCount}>{openCount}</Text>
+            <Text style={s.listHeaderLabel}>
+              open {openCount === 1 ? "request" : "requests"} nearby
+            </Text>
+          </View>
+        ) : null
       }
       ListEmptyComponent={
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>
-            {error ? "Couldn't load requests" : "No incoming requests"}
-          </Text>
-          <Text style={styles.emptyHint}>
-            {error ? error : "New requests near your shop will appear here."}
+        <View style={s.emptyState}>
+          <Text style={s.emptyKicker}>All clear</Text>
+          <Text style={s.emptyTitle}>No open requests</Text>
+          <Text style={s.emptyHint}>
+            {error
+              ? error
+              : "New requests near your shop will show up here automatically."}
           </Text>
         </View>
       }
@@ -490,72 +606,88 @@ function IncomingCard({
     }
   };
 
+  const isUrgent = request.urgency === "urgent";
+  const hasImages =
+    !!request.prescriptionImages && request.prescriptionImages.length > 0;
+
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.medicineName}>{request.medicineName}</Text>
-        {request.urgency === "urgent" && (
-          <View style={styles.urgentBadge}>
-            <Text style={styles.urgentBadgeText}>URGENT</Text>
+    <View style={[s.requestCard, isUrgent && s.requestCardUrgent]}>
+      {isUrgent && (
+        <View style={s.urgentStripe}>
+          <Text style={s.urgentStripeText}>URGENT</Text>
+        </View>
+      )}
+
+      <View style={s.requestCardBody}>
+        <Text style={s.requestTitle}>
+          {request.medicineName || "Prescription photo"}
+        </Text>
+
+        {request.description ? (
+          <Text style={s.requestDesc} numberOfLines={3}>
+            {request.description}
+          </Text>
+        ) : null}
+
+        <View style={s.metaRow}>
+          <Text style={s.metaChip}>
+            {typeof request.distanceMeters === "number"
+              ? formatDistance(request.distanceMeters)
+              : "nearby"}
+          </Text>
+          <Text style={s.metaDot}>·</Text>
+          <Text style={s.metaChip}>{timeAgo(request.createdAt)}</Text>
+        </View>
+
+        {hasImages && (
+          <View style={s.thumbStrip}>
+            {request.prescriptionImages!.map((url, i) => (
+              <Image key={i} source={{ uri: url }} style={s.thumb} />
+            ))}
           </View>
         )}
-      </View>
 
-      {request.description ? (
-        <Text style={styles.description}>{request.description}</Text>
-      ) : null}
-
-      <Text style={styles.meta}>Submitted {timeAgo(request.createdAt)}</Text>
-
-      {typeof request.distanceMeters === "number" && (
-        <View style={styles.distanceRow}>
-          <Text style={styles.distanceLabel}>
-            📍 {formatDistance(request.distanceMeters)} away
-          </Text>
-        </View>
-      )}
-
-      {request.contactPhone && (
-        <Pressable
-          style={styles.callRow}
-          onPress={() =>
-            Linking.openURL(
-              `tel:${request.contactCountryCode || "+91"}${request.contactPhone}`,
-            )
-          }
-        >
-          <Text style={styles.callIcon}>📞</Text>
-          <Text style={styles.callText}>
-            {request.contactCountryCode || "+91"} {request.contactPhone}
-          </Text>
-        </Pressable>
-      )}
-
-      {request.prescriptionImages && request.prescriptionImages.length > 0 && (
-        <View style={styles.imageStrip}>
-          {request.prescriptionImages.map((url, i) => (
-            <Image key={i} source={{ uri: url }} style={styles.stripThumb} />
-          ))}
-        </View>
-      )}
-
-      {request.prescriptionImages && request.prescriptionImages.length > 0 && (
-        <Pressable style={styles.flagBtn} onPress={handleFlag} disabled={busy}>
-          <Text style={styles.flagText}>Flag prescription</Text>
-        </Pressable>
-      )}
-
-      <Pressable
-        style={[styles.availableBtn, busy && styles.btnDisabled]}
-        onPress={onAvailable}
-        disabled={busy}
-      >
-        {busy ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.availableBtnText}>I have this</Text>
+        {request.contactPhone && (
+          <Pressable
+            style={s.contactRow}
+            onPress={() =>
+              Linking.openURL(
+                `tel:${request.contactCountryCode || "+91"}${request.contactPhone}`,
+              )
+            }
+          >
+            <Text style={s.contactIcon}>☎</Text>
+            <Text style={s.contactNumber}>
+              {request.contactCountryCode || "+91"} {request.contactPhone}
+            </Text>
+            <Text style={s.contactCta}>Call</Text>
+          </Pressable>
         )}
-      </Pressable>
+
+        <View style={s.cardActions}>
+          <Pressable
+            style={[s.primaryAction, busy && s.btnDisabled]}
+            onPress={onAvailable}
+            disabled={busy}
+          >
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={s.primaryActionText}>I have this</Text>
+            )}
+          </Pressable>
+
+          {hasImages && (
+            <Pressable
+              style={[s.secondaryAction, busy && s.btnDisabled]}
+              onPress={handleFlag}
+              disabled={busy}
+            >
+              <Text style={s.secondaryActionText}>Flag</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -593,237 +725,546 @@ function formatDistance(meters: number): string {
 }
 
 // ==================== STYLES ====================
+const s = StyleSheet.create({
+  flex: { flex: 1, backgroundColor: C.mist },
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: { padding: 24, paddingTop: 60, gap: 6 },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 32,
-    gap: 8,
+    backgroundColor: C.mist,
   },
-  list: { padding: 16, paddingTop: 60, gap: 12 },
-  emptyList: { flexGrow: 1 },
 
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#444" },
-  emptyHint: { fontSize: 13, color: "#888", textAlign: "center" },
+  // ---- Request form ----
+  formScroll: {
+    padding: 16,
+    paddingTop: 48,
+    paddingBottom: 40,
+  },
 
-  title: { fontSize: 26, fontWeight: "700" },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
+  heroBlock: { marginBottom: 20 },
+  heroKicker: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    color: C.accent,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  heroTitle: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: C.ink,
+    letterSpacing: -0.6,
+    lineHeight: 34,
+  },
+  heroSub: {
+    fontSize: 14,
+    color: C.slate,
+    marginTop: 6,
+    lineHeight: 20,
+  },
 
-  label: { fontSize: 13, fontWeight: "600", color: "#444", marginTop: 12 },
-  helpText: { fontSize: 12, color: "#888", marginTop: 4, marginBottom: 4 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.1,
+    color: C.slate,
+    textTransform: "uppercase",
+    marginTop: 16,
+    marginBottom: 6,
+  },
+  fieldHint: {
+    fontSize: 12,
+    color: C.muted,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  fieldInput: {
+    backgroundColor: C.paper,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
-    backgroundColor: "#fff",
+    color: C.ink,
+    borderWidth: 1.5,
+    borderColor: C.line,
   },
-  multiline: { minHeight: 80, textAlignVertical: "top" },
-
-  phoneContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-  },
-  phonePrefix: {
-    fontSize: 15,
-    color: "#444",
-    fontWeight: "600",
-    marginRight: 6,
-  },
-  phoneInput: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#000",
+  fieldMultiline: {
+    minHeight: 72,
+    textAlignVertical: "top",
+    paddingTop: 12,
   },
 
+  // Image picker — full-width, tappable, clearly readable
   imageRow: {
+    gap: 10,
+    marginTop: 4,
+  },
+  imageGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 6,
+    gap: 10,
+    marginBottom: 10,
   },
-  imageThumbWrap: { position: "relative" },
+  imageThumbWrap: {
+    position: "relative",
+    width: 140,
+    height: 140,
+  },
   imageThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 8,
-    backgroundColor: "#eee",
+    width: "100%",
+    height: "100%",
+    borderRadius: 14,
+    backgroundColor: C.lineFaint,
   },
   imageRemove: {
     position: "absolute",
-    top: -6,
-    right: -6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#c62828",
+    top: -8,
+    right: -8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.accent,
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 2.5,
+    borderColor: C.mist,
   },
   imageRemoveText: {
     color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
-    lineHeight: 16,
+    fontWeight: "800",
+    fontSize: 16,
+    lineHeight: 18,
   },
   imageAddBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 8,
-    borderWidth: 1.5,
+    width: "100%",
+    height: 96,
+    borderRadius: 14,
+    borderWidth: 2,
     borderStyle: "dashed",
-    borderColor: "#007aff",
+    borderColor: C.line,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f0f7ff",
+    backgroundColor: C.paper,
+    gap: 4,
+    flexDirection: "row",
   },
-  imageAddText: { color: "#007aff", fontWeight: "700", fontSize: 13 },
+  imageAddPlus: {
+    fontSize: 24,
+    color: C.slate,
+    fontWeight: "400",
+    lineHeight: 26,
+    marginRight: 6,
+  },
+  imageAddLabel: {
+    fontSize: 14,
+    color: C.slate,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
+  imageCountPill: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: C.signalSoft,
+  },
+  imageCountText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: C.signal,
+    letterSpacing: 0.3,
+  },
 
-  urgencyRow: { flexDirection: "row", gap: 8 },
-  urgencyBtn: {
+  // Segmented control
+  segment: {
+    flexDirection: "row",
+    backgroundColor: C.lineFaint,
+    borderRadius: 12,
+    padding: 3,
+    gap: 3,
+  },
+  segmentItem: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#ddd",
+    paddingVertical: 10,
+    borderRadius: 9,
     alignItems: "center",
-    backgroundColor: "#fff",
   },
-  urgencyActive: { backgroundColor: "#007aff", borderColor: "#007aff" },
-  urgencyText: { fontSize: 14, color: "#333", fontWeight: "600" },
-  urgencyTextActive: { color: "#fff" },
+  segmentItemActive: {
+    backgroundColor: C.paper,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  segmentItemActiveUrgent: {
+    backgroundColor: C.accent,
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  segmentText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: C.slate,
+  },
+  segmentTextActive: { color: C.ink },
 
+  // Phone
+  phoneField: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: C.paper,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    paddingHorizontal: 14,
+    height: 46,
+  },
+  phonePrefix: {
+    fontSize: 15,
+    color: C.slate,
+    fontWeight: "700",
+  },
+  phoneDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: C.line,
+    marginHorizontal: 10,
+  },
+  phoneInput: {
+    flex: 1,
+    fontSize: 15,
+    color: C.ink,
+    height: "100%",
+  },
+
+  // Location
   locationBtn: {
-    marginTop: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#007aff",
+    flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f0f7ff",
-  },
-  locationBtnText: { color: "#007aff", fontSize: 14, fontWeight: "700" },
-
-  locationBox: {
-    marginTop: 8,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: "#e7f5e8",
-    borderWidth: 1,
-    borderColor: "#b5ddb8",
-  },
-  locationOk: { color: "#1d6b2a", fontWeight: "600", fontSize: 13 },
-  locationCoords: { color: "#1d6b2a", fontSize: 11, marginTop: 2 },
-
-  submitBtn: {
-    backgroundColor: "#007aff",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: C.paper,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: C.line,
     paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: "center",
-    marginTop: 24,
   },
-  btnDisabled: { opacity: 0.5 },
-  submitText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-
-  successBox: {
-    marginTop: 20,
+  locationIcon: { fontSize: 16, color: C.accent },
+  locationText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: C.ink,
+  },
+  locationCard: {
+    marginTop: 8,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#e7f5e8",
-    borderWidth: 1,
-    borderColor: "#b5ddb8",
+    borderRadius: 12,
+    backgroundColor: C.signalSoft,
+    borderWidth: 1.5,
+    borderColor: "#a7e3c7",
   },
-  successTitle: { color: "#1d6b2a", fontWeight: "700" },
-  successId: { color: "#1d6b2a", fontSize: 12, marginTop: 4 },
-  successHint: { color: "#1d6b2a", fontSize: 12, marginTop: 4 },
+  locationCardLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    color: C.signal,
+    textTransform: "uppercase",
+    marginBottom: 3,
+  },
+  locationCardAddress: {
+    fontSize: 14,
+    color: C.ink,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  locationCardCoords: {
+    fontSize: 11,
+    color: C.signal,
+    marginTop: 3,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
 
-  card: {
-    backgroundColor: "#fff",
+  // Submit
+  submitBtn: {
+    backgroundColor: C.accent,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 20,
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  btnDisabled: { opacity: 0.4 },
+  submitText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+
+  successCard: {
+    marginTop: 16,
     padding: 16,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-    gap: 6,
+    backgroundColor: C.signalSoft,
+    borderWidth: 1.5,
+    borderColor: "#a7e3c7",
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  medicineName: { fontSize: 17, fontWeight: "700", flex: 1, marginRight: 8 },
-  urgentBadge: {
-    backgroundColor: "#ffe5e5",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  urgentBadgeText: {
+  successKicker: {
     fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    color: C.signal,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  successTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: C.ink,
+    letterSpacing: -0.2,
+  },
+  successId: {
+    fontSize: 12,
+    color: C.signal,
+    marginTop: 4,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
     fontWeight: "700",
-    color: "#c62828",
-    letterSpacing: 0.5,
+  },
+  successHint: {
+    fontSize: 12,
+    color: C.signal,
+    marginTop: 6,
+    lineHeight: 17,
   },
 
-  description: { fontSize: 13, color: "#555", marginTop: 2 },
-  meta: { fontSize: 12, color: "#999", marginTop: 2 },
+  // ---- Pharmacy list ----
+  list: { padding: 16, paddingTop: 48, paddingBottom: 40, gap: 12 },
+  emptyList: { flexGrow: 1, backgroundColor: C.mist },
 
-  distanceRow: { marginTop: 4 },
-  distanceLabel: { fontSize: 11, color: "#888" },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    marginBottom: 14,
+  },
+  listHeaderCount: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: C.ink,
+    letterSpacing: -0.8,
+  },
+  listHeaderLabel: {
+    fontSize: 13,
+    color: C.slate,
+    fontWeight: "600",
+  },
 
-  callRow: {
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+  },
+  emptyKicker: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    color: C.signal,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: C.ink,
+    letterSpacing: -0.4,
+  },
+  emptyHint: {
+    fontSize: 13,
+    color: C.slate,
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 19,
+    maxWidth: 260,
+  },
+
+  // Request card
+  requestCard: {
+    backgroundColor: C.paper,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  requestCardUrgent: {
+    borderWidth: 1.5,
+    borderColor: C.accent,
+  },
+  urgentStripe: {
+    backgroundColor: C.accent,
+    paddingVertical: 5,
+    paddingHorizontal: 14,
+  },
+  urgentStripeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.8,
+    color: "#fff",
+  },
+  requestCardBody: { padding: 14 },
+
+  requestTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: C.ink,
+    letterSpacing: -0.3,
+    lineHeight: 23,
+  },
+  requestDesc: {
+    fontSize: 13,
+    color: C.slate,
+    marginTop: 4,
+    lineHeight: 19,
+  },
+
+  metaRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: "#f0f7ff",
-    alignSelf: "flex-start",
   },
-  callIcon: { fontSize: 14 },
-  callText: {
-    color: "#007aff",
+  metaChip: {
+    fontSize: 11,
     fontWeight: "700",
+    color: C.slate,
+    letterSpacing: 0.2,
+  },
+  metaDot: { color: C.muted, fontSize: 13 },
+
+  // Pharmacy-side prescription previews
+  thumbStrip: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  thumb: {
+    width: 108,
+    height: 108,
+    borderRadius: 12,
+    backgroundColor: C.lineFaint,
+  },
+
+  contactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: C.lineFaint,
+  },
+  contactIcon: { fontSize: 13, color: C.ink },
+  contactNumber: {
+    flex: 1,
     fontSize: 13,
+    fontWeight: "700",
+    color: C.ink,
+  },
+  contactCta: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: C.accent,
+    letterSpacing: 0.4,
   },
 
-  imageStrip: { flexDirection: "row", gap: 6, marginTop: 6 },
-  stripThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 6,
-    backgroundColor: "#eee",
+  cardActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
   },
-
-  flagBtn: {
-    marginTop: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-    alignItems: "center",
-  },
-  flagText: { color: "#c62828", fontWeight: "600", fontSize: 12 },
-
-  availableBtn: {
-    marginTop: 10,
+  primaryAction: {
+    flex: 1,
     paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: "#1d6b2a",
+    borderRadius: 11,
+    backgroundColor: C.signal,
     alignItems: "center",
+    shadowColor: C.signal,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  availableBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  primaryActionText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  secondaryAction: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 11,
+    backgroundColor: C.paper,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryActionText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: C.slate,
+  },
+  toast: {
+    position: "absolute",
+    top: 56,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: C.signal,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  toastIcon: {
+    fontSize: 22,
+    color: "#fff",
+    fontWeight: "800",
+  },
+  toastTextWrap: { flex: 1, gap: 2 },
+  toastTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: -0.2,
+  },
+  toastSub: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "600",
+  },
 });

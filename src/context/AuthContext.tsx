@@ -26,7 +26,8 @@ interface AuthContextValue {
   isGuest: boolean;
   isPharmacy: boolean;
   isPatient: boolean;
-
+  openRequestCount: number;
+  setOpenRequestCount: React.Dispatch<React.SetStateAction<number>>;
   login: (email: string, password: string) => Promise<User>;
 
   registerPatient: (data: {
@@ -84,7 +85,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
+  const [openRequestCount, setOpenRequestCount] = useState(0);
   const registerPushToken = useCallback(async () => {
     try {
       const token = await getPushToken();
@@ -96,7 +97,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn("[push] register failed:", err);
     }
   }, []);
+  useEffect(() => {
+    if (isLoading || !user) return;
 
+    const fetchCount = async () => {
+      try {
+        if (user.role === "pharmacy") {
+          const list = await api.getNearbyRequests();
+          setOpenRequestCount(list.filter((r) => r.status === "open").length);
+        } else {
+          const list = await api.getMyRequests();
+          setOpenRequestCount(list.filter((r) => r.status === "open").length);
+        }
+      } catch {
+        // ignore — next poll will retry
+      }
+    };
+
+    fetchCount(); // initial
+    const id = setInterval(fetchCount, 30000);
+    return () => clearInterval(id);
+  }, [user, isLoading]);
   // Rehydrate on app launch
   useEffect(() => {
     (async () => {
@@ -222,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await clearToken();
     await clearStoredUser();
+    setOpenRequestCount(0);
     setUser(null);
   }, []);
 
@@ -247,6 +269,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     registerPharmacy,
     requestOtp,
     verifyOtp,
+    openRequestCount,
+    setOpenRequestCount,
     resetPassword,
     logout,
     refreshUser,

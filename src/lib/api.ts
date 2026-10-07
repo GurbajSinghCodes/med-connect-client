@@ -92,6 +92,7 @@ export interface Request {
     pharmacy: { _id: string; name: string; address: string; location: any };
     markedAt: string;
   }[];
+  fulfilledByDistance?: number;
   fulfilledBy?: { _id: string; name: string; address: string };
   fulfilledAt?: string;
   distanceMeters?: number;

@@ -1,38 +1,39 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
+  Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
-
 const POLL_INTERVAL_MS = 5000;
-
 export default function MyRequestsScreen() {
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
-
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const { setOpenRequestCount } = useAuth();
   const fetchRequests = useCallback(async () => {
     try {
       setError(null);
       const list = await api.getMyRequests();
       setRequests(list);
+      setOpenRequestCount(list.filter((r) => r.status === "open").length);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Failed to load";
       setError(msg);
     }
-  }, []);
-
-  // Initial load
+  }, [setOpenRequestCount]);
   useEffect(() => {
     (async () => {
       await fetchRequests();
@@ -40,7 +41,6 @@ export default function MyRequestsScreen() {
     })();
   }, [fetchRequests]);
 
-  // Poll only while this tab is focused
   useFocusEffect(
     useCallback(() => {
       fetchRequests();
@@ -100,36 +100,70 @@ export default function MyRequestsScreen() {
   }
 
   return (
-    <FlatList
-      data={requests}
-      keyExtractor={(r) => r._id}
-      contentContainerStyle={
-        requests.length === 0 ? styles.emptyList : styles.list
-      }
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-      ListEmptyComponent={
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>
-            {error ? "Couldn't load requests" : "No requests yet"}
-          </Text>
-          <Text style={styles.emptyHint}>
-            {error
-              ? error
-              : "Submit one from the Home tab and it will appear here."}
-          </Text>
-        </View>
-      }
-      renderItem={({ item }) => (
-        <RequestCard
-          request={item}
-          busy={actingOn === item._id}
-          onFulfill={(pharmacyId) => handleFulfill(item._id, pharmacyId)}
-          onCancel={() => handleCancel(item._id)}
-        />
-      )}
-    />
+    <>
+      <FlatList
+        data={requests}
+        keyExtractor={(r) => r._id}
+        contentContainerStyle={
+          requests.length === 0 ? styles.emptyList : styles.list
+        }
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text style={styles.emptyTitle}>
+              {error ? "Couldn't load requests" : "No requests yet"}
+            </Text>
+            <Text style={styles.emptyHint}>
+              {error
+                ? error
+                : "Submit one from the Home tab and it will appear here."}
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => router.push(`/requests/${item._id}` as any)}
+          >
+            <RequestCard
+              request={item}
+              busy={actingOn === item._id}
+              onFulfill={(pharmacyId) => handleFulfill(item._id, pharmacyId)}
+              onCancel={() => handleCancel(item._id)}
+              onViewImage={(url) => setViewerUrl(url)}
+            />
+          </Pressable>
+        )}
+      />
+
+      {/* Fullscreen image viewer */}
+      <Modal
+        visible={viewerUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerUrl(null)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setViewerUrl(null)}
+        >
+          {viewerUrl && (
+            <Image
+              source={{ uri: viewerUrl }}
+              style={styles.modalImage}
+              resizeMode="contain"
+            />
+          )}
+          <Pressable
+            style={styles.modalClose}
+            onPress={() => setViewerUrl(null)}
+          >
+            <Text style={styles.modalCloseText}>Close</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -140,11 +174,13 @@ function RequestCard({
   busy,
   onFulfill,
   onCancel,
+  onViewImage,
 }: {
   request: Request;
   busy: boolean;
   onFulfill: (pharmacyId: string) => void;
   onCancel: () => void;
+  onViewImage: (url: string) => void;
 }) {
   const statusColor = {
     open: "#007aff",
@@ -160,11 +196,16 @@ function RequestCard({
 
   const available = request.availableAt ?? [];
   const isOpen = request.status === "open";
+  const hasImages =
+    Array.isArray(request.prescriptionImages) &&
+    request.prescriptionImages.length > 0;
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.medicineName}>{request.medicineName}</Text>
+        <Text style={styles.medicineName}>
+          {request.medicineName || "Prescription uploaded"}
+        </Text>
         <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
           <Text style={[styles.statusText, { color: statusColor }]}>
             {request.status}
@@ -179,6 +220,20 @@ function RequestCard({
       {request.description ? (
         <Text style={styles.description}>{request.description}</Text>
       ) : null}
+
+      {hasImages && (
+        <View style={styles.imageStrip}>
+          {request.prescriptionImages!.map((url, i) => (
+            <Pressable
+              key={i}
+              onPress={() => onViewImage(url)}
+              style={styles.thumbWrap}
+            >
+              <Image source={{ uri: url }} style={styles.thumb} />
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       <Text style={styles.meta}>Submitted {timeAgo(request.createdAt)}</Text>
 
@@ -300,6 +355,20 @@ const styles = StyleSheet.create({
 
   urgentTag: { fontSize: 12, color: "#c62828", fontWeight: "600" },
   description: { fontSize: 13, color: "#555", marginTop: 2 },
+
+  imageStrip: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  thumbWrap: {
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: "#eee",
+  },
+  thumb: { width: 64, height: 64 },
+
   meta: { fontSize: 12, color: "#999", marginTop: 2 },
 
   waitingBox: {
@@ -365,4 +434,25 @@ const styles = StyleSheet.create({
     borderColor: "#b5ddb8",
   },
   fulfilledText: { color: "#1d6b2a", fontWeight: "600", fontSize: 13 },
+
+  // Fullscreen viewer
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.92)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalImage: {
+    width: "100%",
+    height: "80%",
+  },
+  modalClose: {
+    position: "absolute",
+    bottom: 48,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+  },
+  modalCloseText: { color: "#000", fontWeight: "700", fontSize: 15 },
 });

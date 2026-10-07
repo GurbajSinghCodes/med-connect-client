@@ -119,7 +119,7 @@ function buildPatientFeed(requests: Request[]): AlertItem[] {
       id: `${r._id}-submitted`,
       timestamp: new Date(r.createdAt).getTime(),
       kind: "submitted",
-      title: `You requested ${r.medicineName}`,
+      title: `You requested ${r.medicineName || "a prescription"}`,
       subtitle:
         r.status === "open" ? "Notifying nearby pharmacies…" : undefined,
       urgent: r.urgency === "urgent",
@@ -162,7 +162,7 @@ function buildPharmacyFeed(requests: Request[]): AlertItem[] {
       id: `${r._id}-incoming`,
       timestamp: new Date(r.createdAt).getTime(),
       kind: "incoming",
-      title: `New request: ${r.medicineName}`,
+      title: `New request: ${r.medicineName || "prescription"}`,
       subtitle:
         typeof r.distanceMeters === "number"
           ? `${formatDistance(r.distanceMeters)} away`
