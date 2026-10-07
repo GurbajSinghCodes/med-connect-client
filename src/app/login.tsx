@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -12,43 +13,27 @@ import {
   TextInput,
   View,
 } from "react-native";
+import LocationPicker from "../components/LocationPicker";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../lib/api";
 
 type Mode =
   | "login"
   | "register-choice"
-  | "register-patient"
-  | "register-pharmacy";
+  | "register-patient-otp"
+  | "register-pharmacy-otp";
 
 // ---------- Helpers ----------
 
-/**
- * Extracts the 10-digit local Indian mobile number from any input.
- * Handles: "+91 98765 43210", "+919876543210", "919876543210",
- * "09876543210", "98765 43210", "9876543210".
- * Caps at 10 digits.
- */
 function extractLocalDigits(input: string): string {
-  // Strip a leading "+91 " or "+91" if present
   let s = input.replace(/^\+91\s?/, "");
   let digits = s.replace(/\D/g, "");
-
-  // Pasted "919876543210" → drop the leading "91"
-  if (digits.length > 10 && digits.startsWith("91")) {
-    digits = digits.slice(2);
-  }
-  // Pasted "09876543210" → drop the leading "0"
-  else if (digits.length > 10 && digits.startsWith("0")) {
+  if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.length > 10 && digits.startsWith("0"))
     digits = digits.slice(1);
-  }
-
   return digits.slice(0, 10);
 }
 
-/**
- * Strict validator: exactly 10 digits, first digit 6-9.
- */
 function isValidPhone(local: string): boolean {
   return local.length === 10 && /^[6-9]/.test(local);
 }
@@ -70,9 +55,7 @@ function formatAddress(a: Location.LocationGeocodedAddress): string {
     a.region,
     a.postalCode,
   ].filter((p): p is string => !!p && p.trim().length > 0);
-
-  const deduped = parts.filter((p, i) => p !== parts[i - 1]);
-  return deduped.join(", ");
+  return parts.filter((p, i) => p !== parts[i - 1]).join(", ");
 }
 
 // ---------- Root ----------
@@ -83,28 +66,45 @@ export default function LoginScreen() {
   if (mode === "login") {
     return <LoginForm onRegister={() => setMode("register-choice")} />;
   }
-
   if (mode === "register-choice") {
     return (
       <RegisterChoice
         onBack={() => setMode("login")}
-        onPatient={() => setMode("register-patient")}
-        onPharmacy={() => setMode("register-pharmacy")}
+        onPatient={() => setMode("register-patient-otp")}
+        onPharmacy={() => setMode("register-pharmacy-otp")}
       />
     );
   }
-
-  if (mode === "register-patient") {
-    return <PatientForm onBack={() => setMode("register-choice")} />;
+  if (mode === "register-patient-otp") {
+    return <PatientOtpForm onBack={() => setMode("register-choice")} />;
   }
+  return <PharmacyOtpForm onBack={() => setMode("register-choice")} />;
+}
 
-  return <PharmacyForm onBack={() => setMode("register-choice")} />;
+// ---------- Shared OTP hooks ----------
+
+function useResendCooldown() {
+  const [cooldown, setCooldown] = useState(0);
+  const start = () => {
+    setCooldown(60);
+    const t = setInterval(() => {
+      setCooldown((s) => {
+        if (s <= 1) {
+          clearInterval(t);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+  };
+  return { cooldown, start };
 }
 
 // ---------- Login ----------
 
 function LoginForm({ onRegister }: { onRegister: () => void }) {
   const { login } = useAuth();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -118,8 +118,10 @@ function LoginForm({ onRegister }: { onRegister: () => void }) {
     try {
       await login(email.trim().toLowerCase(), password);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Login failed";
-      Alert.alert("Error", msg);
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Login failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -172,6 +174,14 @@ function LoginForm({ onRegister }: { onRegister: () => void }) {
           )}
         </Pressable>
 
+        <Pressable
+          style={styles.linkBtn}
+          onPress={() => router.push("/forgot-password")}
+          disabled={busy}
+        >
+          <Text style={styles.linkText}>Forgot password?</Text>
+        </Pressable>
+
         <Pressable style={styles.linkBtn} onPress={onRegister} disabled={busy}>
           <Text style={styles.linkText}>Don't have an account? Register</Text>
         </Pressable>
@@ -215,52 +225,150 @@ function RegisterChoice({
   );
 }
 
-// ---------- Patient form ----------
+// ---------- Patient OTP form ----------
 
-function PatientForm({ onBack }: { onBack: () => void }) {
-  const { registerPatient } = useAuth();
-  const [name, setName] = useState("");
+function PatientOtpForm({ onBack }: { onBack: () => void }) {
+  const { requestOtp, verifyOtp } = useAuth();
+  const { cooldown, start: startCooldown } = useResendCooldown();
+
+  const [stage, setStage] = useState<"email" | "details">("email");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async () => {
-    if (!name.trim() || !email.trim() || !password || !phone.trim()) {
+  const sendCode = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      Alert.alert("Invalid email", "Enter a valid email address.");
+      return;
+    }
+    setSending(true);
+    try {
+      await requestOtp(trimmed, "verification");
+      setStage("details");
+      startCooldown();
+      Alert.alert("Code sent", "Check your inbox for the 6-digit code.");
+    } catch (err) {
       Alert.alert(
-        "Missing info",
-        "Name, email, password, and phone are required.",
+        "Error",
+        err instanceof ApiError ? err.message : "Couldn't send code",
       );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const resend = async () => {
+    if (cooldown > 0) return;
+    try {
+      await requestOtp(email.trim().toLowerCase(), "verification");
+      startCooldown();
+      Alert.alert("Code resent");
+    } catch (err) {
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Couldn't resend",
+      );
+    }
+  };
+
+  const verify = async () => {
+    if (!/^\d{6}$/.test(code.trim())) {
+      Alert.alert("Invalid code", "Enter the 6-digit code from your email.");
+      return;
+    }
+    if (!name.trim()) {
+      Alert.alert("Missing info", "Enter your name.");
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      Alert.alert("Invalid phone", "Enter a valid 10-digit mobile number.");
       return;
     }
     if (password.length < 6) {
       Alert.alert("Weak password", "Password must be at least 6 characters.");
       return;
     }
-    if (!isValidPhone(phone)) {
-      Alert.alert(
-        "Invalid phone",
-        "Enter a valid 10-digit Indian mobile number (starting with 6-9).",
-      );
+    if (password !== confirmPassword) {
+      Alert.alert("Mismatch", "Passwords don't match.");
       return;
     }
 
     setBusy(true);
     try {
-      await registerPatient({
-        name: name.trim(),
+      await verifyOtp({
         email: email.trim().toLowerCase(),
-        password,
+        code: code.trim(),
+        purpose: "verification",
+        role: "patient",
+        name: name.trim(),
         phone,
         countryCode: "+91",
+        password,
       });
+      // Success — AuthContext updates, tabs swap
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Registration failed";
-      Alert.alert("Error", msg);
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Verification failed",
+      );
     } finally {
       setBusy(false);
     }
   };
+
+  if (stage === "email") {
+    return (
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>Patient account</Text>
+          <Text style={styles.subtitle}>
+            We'll email you a code to verify your account.
+          </Text>
+
+          <Text style={styles.label}>Email *</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            placeholderTextColor="#999"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            editable={!sending}
+          />
+
+          <Pressable
+            style={[styles.primaryBtn, sending && styles.btnDisabled]}
+            onPress={sendCode}
+            disabled={sending}
+          >
+            {sending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryText}>Send code</Text>
+            )}
+          </Pressable>
+
+          <Pressable style={styles.linkBtn} onPress={onBack} disabled={sending}>
+            <Text style={styles.linkText}>Back</Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -271,41 +379,40 @@ function PatientForm({ onBack }: { onBack: () => void }) {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Patient account</Text>
-        <Text style={styles.subtitle}>
-          Create an account to track your requests
-        </Text>
+        <Text style={styles.title}>Verify & finish</Text>
+        <Text style={styles.subtitle}>We sent a code to {email}.</Text>
 
-        <Text style={styles.label}>Name *</Text>
+        <Text style={styles.label}>Verification code *</Text>
+        <TextInput
+          style={[styles.input, styles.codeInput]}
+          value={code}
+          onChangeText={(t) => setCode(t.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          placeholderTextColor="#999"
+          keyboardType="number-pad"
+          maxLength={6}
+          editable={!busy}
+        />
+
+        <Pressable
+          style={styles.resendBtn}
+          onPress={resend}
+          disabled={cooldown > 0 || busy}
+        >
+          <Text style={styles.resendText}>
+            {cooldown > 0
+              ? `Resend in ${cooldown}s`
+              : "Didn't get it? Resend code"}
+          </Text>
+        </Pressable>
+
+        <Text style={styles.label}>Your name *</Text>
         <TextInput
           style={styles.input}
           value={name}
           onChangeText={setName}
-          placeholder="Your name"
+          placeholder="Full name"
           placeholderTextColor="#999"
-          editable={!busy}
-        />
-
-        <Text style={styles.label}>Email *</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="you@example.com"
-          placeholderTextColor="#999"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          editable={!busy}
-        />
-
-        <Text style={styles.label}>Password *</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="At least 6 characters"
-          placeholderTextColor="#999"
-          secureTextEntry
           editable={!busy}
         />
 
@@ -319,141 +426,215 @@ function PatientForm({ onBack }: { onBack: () => void }) {
             placeholder="98765 43210"
             placeholderTextColor="#999"
             keyboardType="phone-pad"
-            maxLength={15}
+            maxLength={10}
             editable={!busy}
           />
         </View>
 
+        <Text style={styles.label}>Password *</Text>
+        <TextInput
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Min 6 characters"
+          placeholderTextColor="#999"
+          secureTextEntry
+          editable={!busy}
+        />
+
+        <Text style={styles.label}>Confirm password *</Text>
+        <TextInput
+          style={styles.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="Repeat password"
+          placeholderTextColor="#999"
+          secureTextEntry
+          editable={!busy}
+        />
+
         <Pressable
           style={[styles.primaryBtn, busy && styles.btnDisabled]}
-          onPress={handleSubmit}
+          onPress={verify}
           disabled={busy}
         >
           {busy ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryText}>Create account</Text>
+            <Text style={styles.primaryText}>Verify & create account</Text>
           )}
         </Pressable>
 
-        <Pressable style={styles.linkBtn} onPress={onBack} disabled={busy}>
-          <Text style={styles.linkText}>Back</Text>
+        <Pressable
+          style={styles.linkBtn}
+          onPress={() => setStage("email")}
+          disabled={busy}
+        >
+          <Text style={styles.linkText}>Change email</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-// ---------- Pharmacy form ----------
+// ---------- Pharmacy OTP form ----------
 
-function PharmacyForm({ onBack }: { onBack: () => void }) {
-  const { registerPharmacy } = useAuth();
-  const [ownerName, setOwnerName] = useState("");
+function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
+  const { requestOtp, verifyOtp } = useAuth();
+  const { cooldown, start: startCooldown } = useResendCooldown();
+
+  const [stage, setStage] = useState<"email" | "details">("email");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const [code, setCode] = useState("");
+  const [ownerName, setOwnerName] = useState("");
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [pharmacyName, setPharmacyName] = useState("");
   const [address, setAddress] = useState("");
   const [longitude, setLongitude] = useState("");
   const [latitude, setLatitude] = useState("");
-  const [locating, setLocating] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const handleUseCurrentLocation = async () => {
-    setLocating(true);
+  const sendCode = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      Alert.alert("Invalid email", "Enter a valid email address.");
+      return;
+    }
+    setSending(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission denied",
-          "Location permission is required to pin your pharmacy.",
-        );
-        return;
-      }
-
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      setLongitude(pos.coords.longitude.toFixed(6));
-      setLatitude(pos.coords.latitude.toFixed(6));
-
-      try {
-        const results = await Location.reverseGeocodeAsync({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        });
-        if (results.length > 0) {
-          setAddress(formatAddress(results[0]));
-        } else {
-          Alert.alert(
-            "Address not found",
-            "Coordinates were set, but we couldn't resolve an address. Please type it manually.",
-          );
-        }
-      } catch {
-        // Geocoding is best-effort; coordinates are what matter
-      }
-    } catch (err: any) {
-      Alert.alert("Location error", err.message || "Could not fetch location");
+      await requestOtp(trimmed, "verification");
+      setStage("details");
+      startCooldown();
+      Alert.alert("Code sent", "Check your inbox for the 6-digit code.");
+    } catch (err) {
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Couldn't send code",
+      );
     } finally {
-      setLocating(false);
+      setSending(false);
     }
   };
 
-  const handleSubmit = async () => {
-    if (
-      !ownerName.trim() ||
-      !email.trim() ||
-      !password ||
-      !phone.trim() ||
-      !pharmacyName.trim() ||
-      !address.trim()
-    ) {
-      Alert.alert("Missing info", "All fields marked * are required.");
+  const resend = async () => {
+    if (cooldown > 0) return;
+    try {
+      await requestOtp(email.trim().toLowerCase(), "verification");
+      startCooldown();
+      Alert.alert("Code resent");
+    } catch (err) {
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Couldn't resend",
+      );
+    }
+  };
+
+  const verify = async () => {
+    if (!/^\d{6}$/.test(code.trim())) {
+      Alert.alert("Invalid code", "Enter the 6-digit code from your email.");
+      return;
+    }
+    if (!ownerName.trim() || !pharmacyName.trim() || !address.trim()) {
+      Alert.alert(
+        "Missing info",
+        "Owner name, pharmacy name, and address are required.",
+      );
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      Alert.alert("Invalid phone", "Enter a valid 10-digit mobile number.");
       return;
     }
     if (password.length < 6) {
       Alert.alert("Weak password", "Password must be at least 6 characters.");
       return;
     }
-    if (!isValidPhone(phone)) {
-      Alert.alert(
-        "Invalid phone",
-        "Enter a valid 10-digit Indian mobile number (starting with 6-9).",
-      );
+    if (password !== confirmPassword) {
+      Alert.alert("Mismatch", "Passwords don't match.");
       return;
     }
     if (!isValidCoord(longitude, latitude)) {
-      Alert.alert(
-        "Missing location",
-        "Tap 'Use my current location' to pin your pharmacy, or enter coordinates manually.",
-      );
+      Alert.alert("Missing location", "Pin your pharmacy location first.");
       return;
     }
 
     setBusy(true);
     try {
-      await registerPharmacy({
-        name: ownerName.trim(),
+      await verifyOtp({
         email: email.trim().toLowerCase(),
-        password,
+        code: code.trim(),
+        purpose: "verification",
+        role: "pharmacy",
+        name: ownerName.trim(),
         phone,
         countryCode: "+91",
+        password,
         pharmacyName: pharmacyName.trim(),
         address: address.trim(),
         longitude: parseFloat(longitude),
         latitude: parseFloat(latitude),
       });
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Registration failed";
-      Alert.alert("Error", msg);
+      Alert.alert(
+        "Error",
+        err instanceof ApiError ? err.message : "Verification failed",
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const hasCoords = isValidCoord(longitude, latitude);
+  if (stage === "email") {
+    return (
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>Pharmacy account</Text>
+          <Text style={styles.subtitle}>
+            We'll email you a code to verify your account.
+          </Text>
+
+          <Text style={styles.label}>Email *</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="owner@example.com"
+            placeholderTextColor="#999"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            editable={!sending}
+          />
+
+          <Pressable
+            style={[styles.primaryBtn, sending && styles.btnDisabled]}
+            onPress={sendCode}
+            disabled={sending}
+          >
+            {sending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryText}>Send code</Text>
+            )}
+          </Pressable>
+
+          <Pressable style={styles.linkBtn} onPress={onBack} disabled={sending}>
+            <Text style={styles.linkText}>Back</Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -464,10 +645,32 @@ function PharmacyForm({ onBack }: { onBack: () => void }) {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Pharmacy account</Text>
-        <Text style={styles.subtitle}>
-          Register your shop to receive nearby requests
-        </Text>
+        <Text style={styles.title}>Verify & finish</Text>
+        <Text style={styles.subtitle}>We sent a code to {email}.</Text>
+
+        <Text style={styles.label}>Verification code *</Text>
+        <TextInput
+          style={[styles.input, styles.codeInput]}
+          value={code}
+          onChangeText={(t) => setCode(t.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          placeholderTextColor="#999"
+          keyboardType="number-pad"
+          maxLength={6}
+          editable={!busy}
+        />
+
+        <Pressable
+          style={styles.resendBtn}
+          onPress={resend}
+          disabled={cooldown > 0 || busy}
+        >
+          <Text style={styles.resendText}>
+            {cooldown > 0
+              ? `Resend in ${cooldown}s`
+              : "Didn't get it? Resend code"}
+          </Text>
+        </Pressable>
 
         <Text style={styles.sectionHeader}>Owner</Text>
 
@@ -481,29 +684,6 @@ function PharmacyForm({ onBack }: { onBack: () => void }) {
           editable={!busy}
         />
 
-        <Text style={styles.label}>Email *</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="owner@example.com"
-          placeholderTextColor="#999"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          editable={!busy}
-        />
-
-        <Text style={styles.label}>Password *</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="At least 6 characters"
-          placeholderTextColor="#999"
-          secureTextEntry
-          editable={!busy}
-        />
-
         <Text style={styles.label}>Phone *</Text>
         <View style={styles.phoneContainer}>
           <Text style={styles.phonePrefix}>+91</Text>
@@ -514,10 +694,32 @@ function PharmacyForm({ onBack }: { onBack: () => void }) {
             placeholder="98765 43210"
             placeholderTextColor="#999"
             keyboardType="phone-pad"
-            maxLength={15}
+            maxLength={10}
             editable={!busy}
           />
         </View>
+
+        <Text style={styles.label}>Password *</Text>
+        <TextInput
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Min 6 characters"
+          placeholderTextColor="#999"
+          secureTextEntry
+          editable={!busy}
+        />
+
+        <Text style={styles.label}>Confirm password *</Text>
+        <TextInput
+          style={styles.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="Repeat password"
+          placeholderTextColor="#999"
+          secureTextEntry
+          editable={!busy}
+        />
 
         <Text style={styles.sectionHeader}>Pharmacy</Text>
 
@@ -533,56 +735,18 @@ function PharmacyForm({ onBack }: { onBack: () => void }) {
 
         <Text style={styles.sectionHeader}>Location *</Text>
         <Text style={styles.helpText}>
-          Tap the button below to pin your shop from GPS. The address field will
-          be filled automatically — you can edit it after.
+          Pin your shop's location. Use GPS if you're there now, or pick on the
+          map.
         </Text>
-
-        <Pressable
-          style={[styles.locationBtn, (busy || locating) && styles.btnDisabled]}
-          onPress={handleUseCurrentLocation}
-          disabled={busy || locating}
-        >
-          {locating ? (
-            <ActivityIndicator color="#007aff" />
-          ) : (
-            <Text style={styles.locationBtnText}>
-              {hasCoords ? "Update from GPS" : "Use my current location"}
-            </Text>
-          )}
-        </Pressable>
-
-        <View style={styles.coordRow}>
-          <View style={styles.coordCol}>
-            <Text style={styles.label}>Longitude</Text>
-            <TextInput
-              style={styles.input}
-              value={longitude}
-              onChangeText={setLongitude}
-              placeholder="77.2100"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              editable={!busy}
-            />
-          </View>
-          <View style={styles.coordCol}>
-            <Text style={styles.label}>Latitude</Text>
-            <TextInput
-              style={styles.input}
-              value={latitude}
-              onChangeText={setLatitude}
-              placeholder="28.6140"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              editable={!busy}
-            />
-          </View>
-        </View>
-
-        {hasCoords && (
-          <Text style={styles.coordOk}>
-            ✓ Coordinates set: {latitude}, {longitude}
-          </Text>
-        )}
+        <LocationPicker
+          longitude={longitude}
+          latitude={latitude}
+          onChange={(lng, lat) => {
+            setLongitude(lng);
+            setLatitude(lat);
+          }}
+          onAddressResolved={(addr) => setAddress(addr)}
+        />
 
         <Text style={styles.label}>Address *</Text>
         <TextInput
@@ -598,18 +762,22 @@ function PharmacyForm({ onBack }: { onBack: () => void }) {
 
         <Pressable
           style={[styles.primaryBtn, busy && styles.btnDisabled]}
-          onPress={handleSubmit}
+          onPress={verify}
           disabled={busy}
         >
           {busy ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryText}>Register pharmacy</Text>
+            <Text style={styles.primaryText}>Verify & create account</Text>
           )}
         </Pressable>
 
-        <Pressable style={styles.linkBtn} onPress={onBack} disabled={busy}>
-          <Text style={styles.linkText}>Back</Text>
+        <Pressable
+          style={styles.linkBtn}
+          onPress={() => setStage("email")}
+          disabled={busy}
+        >
+          <Text style={styles.linkText}>Change email</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -641,6 +809,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     backgroundColor: "#fff",
   },
+  codeInput: {
+    fontSize: 22,
+    letterSpacing: 8,
+    textAlign: "center",
+    fontWeight: "700",
+  },
   multiline: { minHeight: 80, textAlignVertical: "top" },
 
   phoneContainer: {
@@ -658,27 +832,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginRight: 6,
   },
-  phoneInput: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#000",
-  },
-
-  locationBtn: {
-    marginTop: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#007aff",
-    alignItems: "center",
-    backgroundColor: "#f0f7ff",
-  },
-  locationBtnText: { color: "#007aff", fontSize: 14, fontWeight: "700" },
-
-  coordRow: { flexDirection: "row", gap: 12 },
-  coordCol: { flex: 1 },
-  coordOk: { fontSize: 12, color: "#1d6b2a", marginTop: 8, fontWeight: "600" },
+  phoneInput: { flex: 1, paddingVertical: 10, fontSize: 15, color: "#000" },
 
   primaryBtn: {
     backgroundColor: "#007aff",
@@ -692,6 +846,9 @@ const styles = StyleSheet.create({
 
   linkBtn: { paddingVertical: 12, alignItems: "center" },
   linkText: { color: "#007aff", fontSize: 14, fontWeight: "600" },
+
+  resendBtn: { paddingVertical: 10, alignItems: "center" },
+  resendText: { color: "#007aff", fontSize: 13, fontWeight: "600" },
 
   choiceCard: {
     padding: 20,

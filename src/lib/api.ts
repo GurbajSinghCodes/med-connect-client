@@ -1,26 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
-
-// --- Config ---
-
-/**
- * Derives the backend URL from the Expo dev server.
- * When the app loads from the laptop at 192.168.1.22:8081,
- * we talk to the backend at 192.168.1.22:5000.
- */
-const getBaseUrl = (): string => {
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const host = hostUri.split(":")[0];
-    return `http://${host}:5000`;
-  }
-  return "http://localhost:5000";
-};
-
-const BASE_URL = getBaseUrl();
-
-// --- Storage keys ---
+import { API_URL } from "./config"; // --- Storage keys ---
 
 const TOKEN_KEY = "@medconnect:token";
 const USER_KEY = "@medconnect:user";
@@ -65,6 +45,7 @@ export interface PharmacyPublic {
   openingTime?: string;
   closingTime?: string;
   contactNumber?: string;
+  contactCountryCode?: string;
   isOpenNow?: boolean | null;
 }
 export interface User {
@@ -95,12 +76,25 @@ export interface Request {
   status: "open" | "fulfilled" | "cancelled";
   currentTier: number;
   notifiedPharmacies: string[];
+  prescriptionImages?: string[];
+  contactPhone?: string;
+  contactCountryCode?: string;
+  isChosen?: boolean;
+  iAccepted?: boolean;
+  flaggedBy?: {
+    pharmacy: string;
+    reason: string;
+    flaggedAt: string;
+  }[];
+  needsReupload?: boolean;
+  reuploadRequestedAt?: string;
   availableAt: {
     pharmacy: { _id: string; name: string; address: string; location: any };
     markedAt: string;
   }[];
   fulfilledBy?: { _id: string; name: string; address: string };
   fulfilledAt?: string;
+  distanceMeters?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +104,9 @@ export interface Pharmacy {
   owner: string;
   name: string;
   address: string;
+  openingTime?: string;
+  closingTime?: string;
+  contactNumber?: string;
   location: { type: "Point"; coordinates: [number, number] };
   isActive: boolean;
   createdAt: string;
@@ -155,7 +152,7 @@ async function request<T>(
     headers["X-Device-Id"] = await getDeviceId();
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -251,7 +248,6 @@ export const api = {
       { email, purpose },
       { guest: false },
     ),
-
   verifyOtp: (data: {
     email: string;
     code: string;
@@ -259,6 +255,8 @@ export const api = {
     role?: Role;
     name?: string;
     phone?: string;
+    countryCode?: string;
+    password?: string;
     pharmacyName?: string;
     address?: string;
     longitude?: number;
@@ -267,8 +265,23 @@ export const api = {
     request<AuthResponse>("POST", "/api/auth/otp/verify", data, {
       guest: false,
     }),
+  resetPassword: (email: string, code: string, newPassword: string) =>
+    request<{ message: string }>(
+      "POST",
+      "/api/auth/otp/reset-password",
+      { email, code, newPassword },
+      { guest: false },
+    ),
+  flagRequest: (id: string, reason: string) =>
+    request<{ flaggedBy: number; needsReupload: boolean }>(
+      "PATCH",
+      `/api/requests/${id}/flag`,
+      { reason },
+      { guest: false },
+    ),
 
-  // --- Requests ---
+  reuploadPrescription: (id: string, images: string[]) =>
+    request<Request>("POST", `/api/requests/${id}/reupload`, { images }),
   createRequest: (data: {
     medicineName: string;
     description?: string;
@@ -276,8 +289,10 @@ export const api = {
     longitude: number;
     latitude: number;
     guestFcmToken?: string;
+    prescriptionImages?: string[];
+    contactPhone?: string;
+    contactCountryCode?: string;
   }) => request<Request>("POST", "/api/requests", data),
-
   getMyRequests: () => request<Request[]>("GET", "/api/requests/my"),
 
   getRequest: (id: string) => request<Request>("GET", `/api/requests/${id}`),
@@ -302,9 +317,14 @@ export const api = {
   getMyPharmacy: () =>
     request<Pharmacy>("GET", "/api/pharmacy/me", undefined, { guest: false }),
 
-  updatePharmacy: (data: { name?: string; address?: string }) =>
-    request<Pharmacy>("PUT", "/api/pharmacy/me", data, { guest: false }),
-
+  updatePharmacy: (data: {
+    name?: string;
+    address?: string;
+    contactNumber?: string;
+    openingTime?: string;
+    closingTime?: string;
+    isActive?: boolean;
+  }) => request<Pharmacy>("PUT", "/api/pharmacy/me", data, { guest: false }),
   updatePharmacyLocation: (longitude: number, latitude: number) =>
     request<Pharmacy>(
       "PUT",

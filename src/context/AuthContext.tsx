@@ -17,6 +17,7 @@ import {
   type Role,
   type User,
 } from "../lib/api";
+import { getPushToken } from "../lib/notifications";
 
 interface AuthContextValue {
   user: User | null;
@@ -25,7 +26,9 @@ interface AuthContextValue {
   isGuest: boolean;
   isPharmacy: boolean;
   isPatient: boolean;
+
   login: (email: string, password: string) => Promise<User>;
+
   registerPatient: (data: {
     name: string;
     email: string;
@@ -45,6 +48,12 @@ interface AuthContextValue {
     longitude: number;
     latitude: number;
   }) => Promise<User>;
+
+  requestOtp: (
+    email: string,
+    purpose?: "verification" | "login" | "reset",
+  ) => Promise<{ message: string }>;
+
   verifyOtp: (data: {
     email: string;
     code: string;
@@ -52,11 +61,20 @@ interface AuthContextValue {
     role?: Role;
     name?: string;
     phone?: string;
+    countryCode?: string;
+    password?: string;
     pharmacyName?: string;
     address?: string;
     longitude?: number;
     latitude?: number;
   }) => Promise<User>;
+
+  resetPassword: (
+    email: string,
+    code: string,
+    newPassword: string,
+  ) => Promise<{ message: string }>;
+
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -66,6 +84,18 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const registerPushToken = useCallback(async () => {
+    try {
+      const token = await getPushToken();
+      if (token) {
+        await api.updateFcmToken(token);
+        console.log("[push] token registered with backend");
+      }
+    } catch (err) {
+      console.warn("[push] register failed:", err);
+    }
+  }, []);
 
   // Rehydrate on app launch
   useEffect(() => {
@@ -77,13 +107,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ]);
         if (token && storedUser) {
           setUser(storedUser);
-          // Refresh silently in the background — ignore failures
           try {
             const fresh = await api.getMe();
             setUser(fresh);
             await setStoredUser(fresh);
+            registerPushToken();
           } catch {
-            // Token expired or invalid — clear local state
             await clearToken();
             await clearStoredUser();
             setUser(null);
@@ -93,15 +122,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [registerPushToken]);
 
-  const persistAuth = useCallback(async (res: AuthResponse) => {
-    const { token, ...userData } = res;
-    await setToken(token);
-    await setStoredUser(userData as User);
-    setUser(userData as User);
-    return userData as User;
-  }, []);
+  const persistAuth = useCallback(
+    async (res: AuthResponse) => {
+      const { token, ...userData } = res;
+      await setToken(token);
+      await setStoredUser(userData as User);
+      setUser(userData as User);
+      registerPushToken();
+      return userData as User;
+    },
+    [registerPushToken],
+  );
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -143,6 +176,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [persistAuth],
   );
 
+  const requestOtp = useCallback(
+    async (
+      email: string,
+      purpose: "verification" | "login" | "reset" = "verification",
+    ) => {
+      return api.requestOtp(email, purpose);
+    },
+    [],
+  );
+
   const verifyOtp = useCallback(
     async (data: {
       email: string;
@@ -151,6 +194,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role?: Role;
       name?: string;
       phone?: string;
+      countryCode?: string;
+      password?: string;
       pharmacyName?: string;
       address?: string;
       longitude?: number;
@@ -160,6 +205,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return persistAuth(res);
     },
     [persistAuth],
+  );
+
+  const resetPassword = useCallback(
+    async (email: string, code: string, newPassword: string) => {
+      return api.resetPassword(email, code, newPassword);
+    },
+    [],
   );
 
   const logout = useCallback(async () => {
@@ -193,7 +245,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login,
     registerPatient,
     registerPharmacy,
+    requestOtp,
     verifyOtp,
+    resetPassword,
     logout,
     refreshUser,
   };
