@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "256651978364",
+    "project_id": "medconnect-098",
+    "storage_bucket": "medconnect-098.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:256651978364:android:17d086e6d458a9281b0bf9",
+        "android_client_info": {
+          "package_name": "com.medconnect.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpKFTjQDuHBIf-iMeh2iouwDd47wj9q-4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
