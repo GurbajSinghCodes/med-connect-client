@@ -76,11 +76,26 @@ export interface Request {
   status: "open" | "fulfilled" | "cancelled";
   currentTier: number;
   notifiedPharmacies: string[];
-  prescriptionImages?: string[];
+  availableAt: {
+    pharmacy: {
+      _id: string;
+      name: string;
+      address: string;
+      location: { type: "Point"; coordinates: [number, number] };
+    };
+    markedAt: string;
+    distanceMeters?: number; // ← add this
+  }[];
+  fulfilledBy?: {
+    _id: string;
+    name: string;
+    address: string;
+    location?: { type: "Point"; coordinates: [number, number] };
+  };
+  fulfilledByDistance?: number;
   contactPhone?: string;
   contactCountryCode?: string;
-  isChosen?: boolean;
-  iAccepted?: boolean;
+  prescriptionImages?: string[];
   flaggedBy?: {
     pharmacy: string;
     reason: string;
@@ -88,18 +103,12 @@ export interface Request {
   }[];
   needsReupload?: boolean;
   reuploadRequestedAt?: string;
-  availableAt: {
-    pharmacy: { _id: string; name: string; address: string; location: any };
-    markedAt: string;
-  }[];
-  fulfilledByDistance?: number;
-  fulfilledBy?: { _id: string; name: string; address: string };
-  fulfilledAt?: string;
   distanceMeters?: number;
+  isChosen?: boolean;
+  iAccepted?: boolean;
   createdAt: string;
   updatedAt: string;
 }
-
 export interface Pharmacy {
   _id: string;
   owner: string;
@@ -183,7 +192,14 @@ export const api = {
     request<AuthResponse>("POST", "/api/auth/register/patient", data, {
       guest: false,
     }),
+  updateProfile: (data: {
+    name?: string;
+    phone?: string;
+    countryCode?: string;
+  }) => request<User>("PUT", "/api/auth/profile", data),
 
+  deactivateAccount: () =>
+    request<{ message: string }>("PATCH", "/api/auth/deactivate"),
   registerPharmacy: (data: {
     name: string;
     email: string;
@@ -224,7 +240,18 @@ export const api = {
       { email, password },
       { guest: false },
     ),
-
+  googleAuth: (data: {
+    idToken: string;
+    role?: Role;
+    name?: string;
+    phone?: string;
+    countryCode?: string;
+    pharmacyName?: string;
+    address?: string;
+    longitude?: number;
+    latitude?: number;
+  }) =>
+    request<AuthResponse>("POST", "/api/auth/google", data, { guest: false }),
   getMe: () => request<User>("GET", "/api/auth/me"),
 
   updateLocation: (longitude: number, latitude: number) =>
@@ -237,7 +264,7 @@ export const api = {
     request<{ message: string }>("PUT", "/api/auth/fcm-token", { fcmToken }),
 
   logout: () => request<{ message: string }>("POST", "/api/auth/logout"),
-
+  deleteAccount: () => request<{ message: string }>("DELETE", "/api/auth/me"),
   // --- OTP ---
   requestOtp: (
     email: string,

@@ -6,14 +6,15 @@ import {
   Alert,
   FlatList,
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SkeletonCard } from "../components/Skeleton";
 import { api, ApiError, type PharmacyPublic } from "../lib/api";
-
 export default function PharmaciesScreen() {
   const router = useRouter();
 
@@ -103,9 +104,15 @@ export default function PharmaciesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-        {locating && <Text style={styles.hint}>Getting your location…</Text>}
+      <View style={styles.wrap}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Nearby pharmacies</Text>
+        </View>
+        <View style={styles.list}>
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </View>
       </View>
     );
   }
@@ -169,60 +176,70 @@ function PharmacyCard({
   const open = pharmacy.isOpenNow;
   const cc = pharmacy.contactCountryCode || "+91";
 
+  const handleCall = () => {
+    const url = `tel:${cc}${pharmacy.contactNumber}`;
+    if (Platform.OS === "web") {
+      // Desktop browsers have no dialer — show the number instead
+      if (typeof window !== "undefined") {
+        window.alert(`Call ${cc} ${pharmacy.contactNumber}`);
+      }
+    } else {
+      Linking.openURL(url);
+    }
+  };
+
   return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.name}>{pharmacy.name}</Text>
-        <View
-          style={[
-            styles.badge,
-            open === true
-              ? styles.badgeOpen
-              : open === false
-                ? styles.badgeClosed
-                : styles.badgeUnknown,
-          ]}
-        >
-          <Text style={styles.badgeText}>
-            {open === true ? "Open" : open === false ? "Closed" : "—"}
-          </Text>
+    <View style={styles.card}>
+      {/* Tappable top section — navigates to detail */}
+      <Pressable style={styles.cardTappable} onPress={onPress}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.name}>{pharmacy.name}</Text>
+          <View
+            style={[
+              styles.badge,
+              open === true
+                ? styles.badgeOpen
+                : open === false
+                  ? styles.badgeClosed
+                  : styles.badgeUnknown,
+            ]}
+          >
+            <Text style={styles.badgeText}>
+              {open === true ? "Open" : open === false ? "Closed" : "—"}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <Text style={styles.address} numberOfLines={2}>
-        {pharmacy.address}
-      </Text>
-
-      {pharmacy.openingTime && pharmacy.closingTime && (
-        <Text style={styles.meta}>
-          Hours: {pharmacy.openingTime} – {pharmacy.closingTime}
+        <Text style={styles.address} numberOfLines={2}>
+          {pharmacy.address}
         </Text>
-      )}
 
+        {pharmacy.openingTime && pharmacy.closingTime && (
+          <Text style={styles.meta}>
+            Hours: {pharmacy.openingTime} – {pharmacy.closingTime}
+          </Text>
+        )}
+      </Pressable>
+
+      {/* Action row — sibling of the tappable section, no nesting */}
       <View style={styles.actionRow}>
         {pharmacy.contactNumber ? (
           <Pressable
-            onPress={(e) => {
-              e.stopPropagation?.();
-              Linking.openURL(`tel:${cc}${pharmacy.contactNumber}`);
-            }}
             style={[styles.actionBtn, styles.callBtn]}
+            onPress={handleCall}
           >
             <Text style={styles.callText}>📞 Call</Text>
           </Pressable>
         ) : null}
 
         <Pressable
-          onPress={(e) => {
-            e.stopPropagation?.();
-            onPress();
-          }}
           style={[styles.actionBtn, styles.detailsBtn]}
+          onPress={onPress}
         >
           <Text style={styles.detailsText}>View details ›</Text>
         </Pressable>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -267,15 +284,6 @@ const styles = StyleSheet.create({
   },
   hint: { fontSize: 12, color: "#888" },
   emptyText: { color: "#888", textAlign: "center" },
-
-  card: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-  },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -291,10 +299,23 @@ const styles = StyleSheet.create({
   address: { fontSize: 13, color: "#555", marginTop: 6 },
   meta: { fontSize: 12, color: "#888", marginTop: 4 },
 
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#eee",
+    overflow: "hidden",
+  },
+  cardTappable: {
+    padding: 16,
+    paddingBottom: 12,
+  },
   actionRow: {
     flexDirection: "row",
     gap: 8,
-    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   actionBtn: {
     flex: 1,

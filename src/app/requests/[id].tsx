@@ -1,3 +1,4 @@
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -10,8 +11,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { SkeletonLine } from "../../components/Skeleton";
 import { api, ApiError, type Request } from "../../lib/api";
-
+import { uploadToImageKit } from "../../lib/imagekit";
 export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -20,7 +22,7 @@ export default function RequestDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
+  const [uploading, setUploading] = useState(false);
   const load = useCallback(async () => {
     try {
       setError(null);
@@ -74,11 +76,70 @@ export default function RequestDetailScreen() {
       },
     ]);
   };
+  const handleReupload = async () => {
+    if (!request) return;
 
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission denied",
+        "Allow photo access to reupload your prescription.",
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsMultipleSelection: true,
+      selectionLimit: 3,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+    setUploading(true);
+    try {
+      const urls = await Promise.all(
+        result.assets.map((asset) => uploadToImageKit(asset.uri)),
+      );
+
+      await api.reuploadPrescription(request._id, urls);
+      await load();
+      Alert.alert(
+        "Prescription updated",
+        "Pharmacies will now see the new photos.",
+      );
+    } catch (err: any) {
+      Alert.alert("Upload failed", err.message || "Could not reupload");
+    } finally {
+      setUploading(false);
+    }
+  };
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={styles.container}>
+        <SkeletonLine width="75%" height={26} />
+        <SkeletonLine
+          width={90}
+          height={24}
+          radius={12}
+          style={{ marginTop: 10 }}
+        />
+        <SkeletonLine width="100%" height={14} style={{ marginTop: 28 }} />
+        <SkeletonLine width="100%" height={14} style={{ marginTop: 8 }} />
+        <SkeletonLine width="85%" height={14} style={{ marginTop: 8 }} />
+        <SkeletonLine
+          width="100%"
+          height={90}
+          radius={10}
+          style={{ marginTop: 28 }}
+        />
+        <SkeletonLine
+          width="100%"
+          height={56}
+          radius={10}
+          style={{ marginTop: 16 }}
+        />
       </View>
     );
   }
@@ -152,6 +213,63 @@ export default function RequestDetailScreen() {
         </>
       )}
 
+      {/* Flag section */}
+      {(request.needsReupload ||
+        (request.flaggedBy && request.flaggedBy.length > 0)) && (
+        <View
+          style={[
+            styles.flagBlock,
+            request.needsReupload
+              ? styles.flagBlockDanger
+              : styles.flagBlockWarn,
+          ]}
+        >
+          <Text
+            style={[
+              styles.flagTitle,
+              request.needsReupload
+                ? styles.flagTitleDanger
+                : styles.flagTitleWarn,
+            ]}
+          >
+            {request.needsReupload
+              ? "⚠ Prescription needs to be reuploaded"
+              : `⚠ ${request.flaggedBy!.length} pharmacies flagged this`}
+          </Text>
+
+          <Text style={styles.flagExplanation}>
+            {request.needsReupload
+              ? "Multiple pharmacies said the photo wasn't clear. Upload a new one to keep this request active."
+              : "Some pharmacies had trouble reading the prescription. You can reupload to help."}
+          </Text>
+
+          {request.flaggedBy && request.flaggedBy.length > 0 && (
+            <View style={styles.flagReasons}>
+              {Array.from(new Set(request.flaggedBy.map((f) => f.reason))).map(
+                (reason) => (
+                  <Text key={reason} style={styles.flagReasonChip}>
+                    {formatFlagReason(reason)}
+                  </Text>
+                ),
+              )}
+            </View>
+          )}
+
+          <Pressable
+            style={[styles.reuploadBtn, uploading && styles.btnDisabled]}
+            onPress={handleReupload}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.reuploadBtnText}>
+                Upload new prescription
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      )}
       {/* Meta */}
       <Text style={styles.sectionLabel}>Submitted</Text>
       <Text style={styles.sectionValue}>
@@ -277,7 +395,18 @@ function formatDistance(meters: number): string {
   if (meters < 1000) return `${meters} m`;
   return `${(meters / 1000).toFixed(1)} km`;
 }
-
+function formatFlagReason(reason: string): string {
+  switch (reason) {
+    case "unreadable":
+      return "Photo unreadable";
+    case "not_prescription":
+      return "Not a prescription";
+    case "irrelevant":
+      return "Irrelevant photo";
+    default:
+      return reason;
+  }
+}
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const sec = Math.floor(diff / 1000);
@@ -443,4 +572,59 @@ const styles = StyleSheet.create({
 
   linkBtn: { paddingVertical: 16, alignItems: "center" },
   linkText: { color: "#007aff", fontWeight: "600", fontSize: 14 },
+  flagBlock: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 8,
+  },
+  flagBlockDanger: {
+    backgroundColor: "#fef2f1",
+    borderColor: "#f5b8b3",
+  },
+  flagBlockWarn: {
+    backgroundColor: "#fef7ed",
+    borderColor: "#f0d5a8",
+  },
+  flagTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  flagTitleDanger: { color: "#c8372d" },
+  flagTitleWarn: { color: "#b45309" },
+  flagExplanation: {
+    fontSize: 13,
+    color: "#555",
+    lineHeight: 18,
+  },
+  flagReasons: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  flagReasonChip: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#333",
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  reuploadBtn: {
+    marginTop: 4,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "#c8372d",
+    alignItems: "center",
+  },
+  reuploadBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+    letterSpacing: 0.2,
+  },
 });

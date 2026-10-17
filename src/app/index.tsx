@@ -19,6 +19,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SkeletonList } from "../components/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 import { uploadToImageKit } from "../lib/imagekit";
@@ -523,11 +524,7 @@ function IncomingRequests() {
   };
 
   if (loading) {
-    return (
-      <View style={s.center}>
-        <ActivityIndicator color={C.accent} />
-      </View>
-    );
+    return <SkeletonList count={3} />;
   }
 
   const openCount = requests.length;

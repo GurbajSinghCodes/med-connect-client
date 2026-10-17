@@ -1,7 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Linking,
   Pressable,
@@ -10,8 +9,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { SkeletonList } from "../components/Skeleton";
 import { api, ApiError, type Request } from "../lib/api";
-
 const POLL_INTERVAL_MS = 5000;
 
 export default function AcceptsScreen() {
@@ -55,13 +54,8 @@ export default function AcceptsScreen() {
     await fetchRequests();
     setRefreshing(false);
   };
-
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
+    return <SkeletonList count={3} />;
   }
 
   return (

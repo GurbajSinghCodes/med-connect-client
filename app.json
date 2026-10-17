@@ -9,7 +9,11 @@
     "scheme": "medconnect",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.medconnect.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.medconnect.app",
@@ -47,7 +51,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "MedConnect uses your location to find nearby pharmacies."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "notification": {
       "icon": "./assets/images/icon.png",

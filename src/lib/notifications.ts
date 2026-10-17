@@ -1,7 +1,6 @@
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
-
 function isExpoGo(): boolean {
   return (
     Constants.appOwnership === "expo" ||
@@ -86,4 +85,19 @@ export async function onNotificationResponse(
   if (!Notifications) return () => {};
   const sub = Notifications.addNotificationResponseReceivedListener(handler);
   return () => sub.remove();
+}
+
+/**
+ * Returns the notification that launched the app, if any.
+ * Used to handle taps when the app was fully closed (cold start).
+ * Returns null in Expo Go or if the module isn't available.
+ */
+export async function getLastNotificationResponse(): Promise<any> {
+  const Notifications = await getNotifications();
+  if (!Notifications) return null;
+  try {
+    return await Notifications.getLastNotificationResponseAsync();
+  } catch {
+    return null;
+  }
 }

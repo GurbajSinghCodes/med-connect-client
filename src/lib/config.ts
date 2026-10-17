@@ -1,40 +1,50 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 
-/**
- * The backend API base URL.
- *
- * Priority:
- *   1. EXPO_PUBLIC_API_URL from .env (explicit override)
- *   2. Auto-detected from Expo's dev-server host (local dev on LAN)
- *   3. Railway production URL (fallback when running standalone)
- *   4. localhost (last resort)
- */
 const PRODUCTION_URL = "https://med-connect.up.railway.app";
 
 function resolveApiUrl(): string {
-  // 1. Explicit override from .env
+  // 1. Explicit override from .env — highest priority
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv && fromEnv.trim().length > 0) {
     return fromEnv.replace(/\/$/, "");
   }
 
-  // 2. Local dev — infer from Metro's host
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const host = hostUri.split(":")[0];
+  // 2. Web in development — always talk to the local backend
+  if (Platform.OS === "web") {
+    if (__DEV__) {
+      return "http://localhost:5000";
+    }
+    // Web in production build — use the deployed backend
+    return PRODUCTION_URL;
+  }
 
-    // Skip tunnel/ngrok hosts — they don't host the backend
-    if (
-      !host.includes("exp.direct") &&
-      !host.includes("ngrok") &&
-      host !== "localhost"
-    ) {
+  // 3. Native in development — infer from Metro host
+  if (__DEV__) {
+    const hostUri = Constants.expoConfig?.hostUri;
+    if (hostUri) {
+      const host = hostUri.split(":")[0];
+
+      // Tunnel mode — the local backend isn't reachable through the tunnel
+      if (host.includes("exp.direct") || host.includes("ngrok")) {
+        return PRODUCTION_URL;
+      }
+
       return `http://${host}:5000`;
     }
   }
 
-  // 3. Production fallback
+  // 4. Native production build (APK/AAB)
   return PRODUCTION_URL;
 }
 
 export const API_URL = resolveApiUrl();
+
+console.log(
+  "[config] API_URL:",
+  API_URL,
+  "| DEV:",
+  __DEV__,
+  "| platform:",
+  Platform.OS,
+);

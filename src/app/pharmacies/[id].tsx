@@ -1,17 +1,16 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Linking,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
+import { SkeletonLine } from "../../components/Skeleton";
 import { api, type PharmacyPublic } from "../../lib/api";
 import { openDirections } from "../../lib/maps";
-
 export default function PharmacyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -37,12 +36,26 @@ export default function PharmacyDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={styles.container}>
+        <SkeletonLine width="70%" height={28} style={{ marginTop: 0 }} />
+        <SkeletonLine
+          width={100}
+          height={22}
+          radius={12}
+          style={{ marginTop: 12 }}
+        />
+        <SkeletonLine width="100%" height={14} style={{ marginTop: 32 }} />
+        <SkeletonLine width="85%" height={14} style={{ marginTop: 8 }} />
+        <SkeletonLine width="60%" height={14} style={{ marginTop: 8 }} />
+        <SkeletonLine
+          width="100%"
+          height={48}
+          radius={10}
+          style={{ marginTop: 40 }}
+        />
       </View>
     );
   }
-
   if (error || !pharmacy) {
     return (
       <View style={styles.center}>
@@ -186,4 +199,3 @@ const styles = StyleSheet.create({
 });
 
 import { Platform } from "react-native";
-

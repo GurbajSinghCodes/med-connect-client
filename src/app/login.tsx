@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import {
 import LocationPicker from "../components/LocationPicker";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../lib/api";
+import { useGoogleAuth } from "../lib/googleAuth";
 
 type Mode =
   | "login"
@@ -81,7 +82,7 @@ export default function LoginScreen() {
   return <PharmacyOtpForm onBack={() => setMode("register-choice")} />;
 }
 
-// ---------- Shared OTP hooks ----------
+// ---------- Shared hooks ----------
 
 function useResendCooldown() {
   const [cooldown, setCooldown] = useState(0);
@@ -103,11 +104,47 @@ function useResendCooldown() {
 // ---------- Login ----------
 
 function LoginForm({ onRegister }: { onRegister: () => void }) {
-  const { login } = useAuth();
+  const { login, googleAuth } = useAuth();
   const router = useRouter();
+  const { request, response, promptAsync } = useGoogleAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Google sign-in — links to any existing account by email
+  // Works for users who registered via OTP, password, or Google
+  useEffect(() => {
+    if (response?.type === "success") {
+      const idToken = response.params?.id_token;
+      if (!idToken) return;
+
+      setBusy(true);
+      (async () => {
+        try {
+          await googleAuth({ idToken });
+        } catch (err: any) {
+          const msg = err?.message || "";
+          if (msg.toLowerCase().includes("role must be")) {
+            Alert.alert(
+              "No account found",
+              "We couldn't find an account with that Google email. Please register first.",
+              [
+                { text: "Cancel", style: "cancel" },
+                { text: "Register", onPress: onRegister },
+              ],
+            );
+          } else {
+            Alert.alert("Error", msg || "Google sign-in failed");
+          }
+        } finally {
+          setBusy(false);
+        }
+      })();
+    } else if (response?.type === "error") {
+      Alert.alert("Google sign-in cancelled");
+    }
+  }, [response, googleAuth, onRegister]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
@@ -138,6 +175,24 @@ function LoginForm({ onRegister }: { onRegister: () => void }) {
       >
         <Text style={styles.title}>Welcome back</Text>
         <Text style={styles.subtitle}>Sign in to manage your requests</Text>
+
+        <Pressable
+          style={[styles.googleBtn, (!request || busy) && styles.btnDisabled]}
+          onPress={() => promptAsync()}
+          disabled={!request || busy}
+        >
+          {busy ? (
+            <ActivityIndicator color="#333" />
+          ) : (
+            <Text style={styles.googleBtnText}>Continue with Google</Text>
+          )}
+        </Pressable>
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>OR</Text>
+          <View style={styles.dividerLine} />
+        </View>
 
         <Text style={styles.label}>Email</Text>
         <TextInput
@@ -208,13 +263,15 @@ function RegisterChoice({
 
       <Pressable style={styles.choiceCard} onPress={onPatient}>
         <Text style={styles.choiceTitle}>I need medicine</Text>
-        <Text style={styles.choiceHint}>Register as a patient</Text>
+        <Text style={styles.choiceHint}>
+          Continue with Google or email — next step
+        </Text>
       </Pressable>
 
       <Pressable style={styles.choiceCard} onPress={onPharmacy}>
         <Text style={styles.choiceTitle}>I'm a pharmacy</Text>
         <Text style={styles.choiceHint}>
-          Register your shop to receive requests
+          Continue with Google or email — next step
         </Text>
       </Pressable>
 
@@ -228,8 +285,13 @@ function RegisterChoice({
 // ---------- Patient OTP form ----------
 
 function PatientOtpForm({ onBack }: { onBack: () => void }) {
-  const { requestOtp, verifyOtp } = useAuth();
+  const { requestOtp, verifyOtp, googleAuth } = useAuth();
   const { cooldown, start: startCooldown } = useResendCooldown();
+  const {
+    request: googleRequest,
+    response: googleResponse,
+    promptAsync,
+  } = useGoogleAuth();
 
   const [stage, setStage] = useState<"email" | "details">("email");
   const [email, setEmail] = useState("");
@@ -241,6 +303,30 @@ function PatientOtpForm({ onBack }: { onBack: () => void }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Google sign-up — patient role, one-tap
+  useEffect(() => {
+    if (googleResponse?.type === "success") {
+      const idToken = googleResponse.params?.id_token;
+      if (!idToken) return;
+
+      setBusy(true);
+      (async () => {
+        try {
+          await googleAuth({
+            idToken,
+            role: "patient",
+          });
+        } catch (err: any) {
+          Alert.alert("Error", err.message || "Google sign-in failed");
+        } finally {
+          setBusy(false);
+        }
+      })();
+    } else if (googleResponse?.type === "error") {
+      Alert.alert("Google sign-in cancelled");
+    }
+  }, [googleResponse, googleAuth]);
 
   const sendCode = async () => {
     const trimmed = email.trim().toLowerCase();
@@ -312,7 +398,6 @@ function PatientOtpForm({ onBack }: { onBack: () => void }) {
         countryCode: "+91",
         password,
       });
-      // Success — AuthContext updates, tabs swap
     } catch (err) {
       Alert.alert(
         "Error",
@@ -335,8 +420,29 @@ function PatientOtpForm({ onBack }: { onBack: () => void }) {
         >
           <Text style={styles.title}>Patient account</Text>
           <Text style={styles.subtitle}>
-            We'll email you a code to verify your account.
+            Sign up with Google for one-tap setup, or use email verification.
           </Text>
+
+          <Pressable
+            style={[
+              styles.googleBtn,
+              (!googleRequest || sending || busy) && styles.btnDisabled,
+            ]}
+            onPress={() => promptAsync()}
+            disabled={!googleRequest || sending || busy}
+          >
+            {busy ? (
+              <ActivityIndicator color="#333" />
+            ) : (
+              <Text style={styles.googleBtnText}>Continue with Google</Text>
+            )}
+          </Pressable>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
           <Text style={styles.label}>Email *</Text>
           <TextInput
@@ -480,12 +586,20 @@ function PatientOtpForm({ onBack }: { onBack: () => void }) {
 // ---------- Pharmacy OTP form ----------
 
 function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
-  const { requestOtp, verifyOtp } = useAuth();
+  const { requestOtp, verifyOtp, googleAuth } = useAuth();
   const { cooldown, start: startCooldown } = useResendCooldown();
+  const {
+    request: googleRequest,
+    response: googleResponse,
+    promptAsync,
+  } = useGoogleAuth();
 
   const [stage, setStage] = useState<"email" | "details">("email");
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Whether the current flow is using Google (skip OTP) or email OTP
+  const [googleIdToken, setGoogleIdToken] = useState<string | null>(null);
 
   const [code, setCode] = useState("");
   const [ownerName, setOwnerName] = useState("");
@@ -497,6 +611,18 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
   const [longitude, setLongitude] = useState("");
   const [latitude, setLatitude] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Google sign-in — store token, jump to details stage
+  useEffect(() => {
+    if (googleResponse?.type === "success") {
+      const idToken = googleResponse.params?.id_token;
+      if (!idToken) return;
+      setGoogleIdToken(idToken);
+      setStage("details");
+    } else if (googleResponse?.type === "error") {
+      Alert.alert("Google sign-in cancelled");
+    }
+  }, [googleResponse]);
 
   const sendCode = async () => {
     const trimmed = email.trim().toLowerCase();
@@ -534,11 +660,7 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const verify = async () => {
-    if (!/^\d{6}$/.test(code.trim())) {
-      Alert.alert("Invalid code", "Enter the 6-digit code from your email.");
-      return;
-    }
+  const submit = async () => {
     if (!ownerName.trim() || !pharmacyName.trim() || !address.trim()) {
       Alert.alert(
         "Missing info",
@@ -550,16 +672,45 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
       Alert.alert("Invalid phone", "Enter a valid 10-digit mobile number.");
       return;
     }
+    if (!isValidCoord(longitude, latitude)) {
+      Alert.alert("Missing location", "Pin your pharmacy location first.");
+      return;
+    }
+
+    // Google path — no OTP, no password
+    if (googleIdToken) {
+      setBusy(true);
+      try {
+        await googleAuth({
+          idToken: googleIdToken,
+          role: "pharmacy",
+          name: ownerName.trim(),
+          phone,
+          countryCode: "+91",
+          pharmacyName: pharmacyName.trim(),
+          address: address.trim(),
+          longitude: parseFloat(longitude),
+          latitude: parseFloat(latitude),
+        });
+      } catch (err: any) {
+        Alert.alert("Error", err.message || "Google sign-in failed");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Email OTP path
+    if (!/^\d{6}$/.test(code.trim())) {
+      Alert.alert("Invalid code", "Enter the 6-digit code from your email.");
+      return;
+    }
     if (password.length < 6) {
       Alert.alert("Weak password", "Password must be at least 6 characters.");
       return;
     }
     if (password !== confirmPassword) {
       Alert.alert("Mismatch", "Passwords don't match.");
-      return;
-    }
-    if (!isValidCoord(longitude, latitude)) {
-      Alert.alert("Missing location", "Pin your pharmacy location first.");
       return;
     }
 
@@ -601,8 +752,25 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
         >
           <Text style={styles.title}>Pharmacy account</Text>
           <Text style={styles.subtitle}>
-            We'll email you a code to verify your account.
+            Sign up with Google, or use email verification.
           </Text>
+
+          <Pressable
+            style={[
+              styles.googleBtn,
+              (!googleRequest || sending) && styles.btnDisabled,
+            ]}
+            onPress={() => promptAsync()}
+            disabled={!googleRequest || sending}
+          >
+            <Text style={styles.googleBtnText}>Continue with Google</Text>
+          </Pressable>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
           <Text style={styles.label}>Email *</Text>
           <TextInput
@@ -645,32 +813,42 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Verify & finish</Text>
-        <Text style={styles.subtitle}>We sent a code to {email}.</Text>
+        <Text style={styles.title}>
+          {googleIdToken ? "Complete your pharmacy profile" : "Verify & finish"}
+        </Text>
+        <Text style={styles.subtitle}>
+          {googleIdToken
+            ? "We have your Google details. Just add your shop information."
+            : `We sent a code to ${email}.`}
+        </Text>
 
-        <Text style={styles.label}>Verification code *</Text>
-        <TextInput
-          style={[styles.input, styles.codeInput]}
-          value={code}
-          onChangeText={(t) => setCode(t.replace(/\D/g, "").slice(0, 6))}
-          placeholder="123456"
-          placeholderTextColor="#999"
-          keyboardType="number-pad"
-          maxLength={6}
-          editable={!busy}
-        />
+        {!googleIdToken && (
+          <>
+            <Text style={styles.label}>Verification code *</Text>
+            <TextInput
+              style={[styles.input, styles.codeInput]}
+              value={code}
+              onChangeText={(t) => setCode(t.replace(/\D/g, "").slice(0, 6))}
+              placeholder="123456"
+              placeholderTextColor="#999"
+              keyboardType="number-pad"
+              maxLength={6}
+              editable={!busy}
+            />
 
-        <Pressable
-          style={styles.resendBtn}
-          onPress={resend}
-          disabled={cooldown > 0 || busy}
-        >
-          <Text style={styles.resendText}>
-            {cooldown > 0
-              ? `Resend in ${cooldown}s`
-              : "Didn't get it? Resend code"}
-          </Text>
-        </Pressable>
+            <Pressable
+              style={styles.resendBtn}
+              onPress={resend}
+              disabled={cooldown > 0 || busy}
+            >
+              <Text style={styles.resendText}>
+                {cooldown > 0
+                  ? `Resend in ${cooldown}s`
+                  : "Didn't get it? Resend code"}
+              </Text>
+            </Pressable>
+          </>
+        )}
 
         <Text style={styles.sectionHeader}>Owner</Text>
 
@@ -699,27 +877,31 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
           />
         </View>
 
-        <Text style={styles.label}>Password *</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Min 6 characters"
-          placeholderTextColor="#999"
-          secureTextEntry
-          editable={!busy}
-        />
+        {!googleIdToken && (
+          <>
+            <Text style={styles.label}>Password *</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Min 6 characters"
+              placeholderTextColor="#999"
+              secureTextEntry
+              editable={!busy}
+            />
 
-        <Text style={styles.label}>Confirm password *</Text>
-        <TextInput
-          style={styles.input}
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          placeholder="Repeat password"
-          placeholderTextColor="#999"
-          secureTextEntry
-          editable={!busy}
-        />
+            <Text style={styles.label}>Confirm password *</Text>
+            <TextInput
+              style={styles.input}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Repeat password"
+              placeholderTextColor="#999"
+              secureTextEntry
+              editable={!busy}
+            />
+          </>
+        )}
 
         <Text style={styles.sectionHeader}>Pharmacy</Text>
 
@@ -762,27 +944,38 @@ function PharmacyOtpForm({ onBack }: { onBack: () => void }) {
 
         <Pressable
           style={[styles.primaryBtn, busy && styles.btnDisabled]}
-          onPress={verify}
+          onPress={submit}
           disabled={busy}
         >
           {busy ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryText}>Verify & create account</Text>
+            <Text style={styles.primaryText}>
+              {googleIdToken
+                ? "Complete registration"
+                : "Verify & create account"}
+            </Text>
           )}
         </Pressable>
 
         <Pressable
           style={styles.linkBtn}
-          onPress={() => setStage("email")}
+          onPress={() => {
+            setGoogleIdToken(null);
+            setStage("email");
+          }}
           disabled={busy}
         >
-          <Text style={styles.linkText}>Change email</Text>
+          <Text style={styles.linkText}>
+            {googleIdToken ? "Use email instead" : "Change email"}
+          </Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
+
+// ---------- Styles ----------
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
@@ -860,4 +1053,27 @@ const styles = StyleSheet.create({
   },
   choiceTitle: { fontSize: 17, fontWeight: "700" },
   choiceHint: { fontSize: 13, color: "#888", marginTop: 4 },
+
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: "#e0e0e0" },
+  dividerText: { fontSize: 12, color: "#999", fontWeight: "700" },
+  googleBtn: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#ddd",
+    alignItems: "center",
+  },
+  googleBtnText: {
+    color: "#333",
+    fontWeight: "700",
+    fontSize: 15,
+  },
 });

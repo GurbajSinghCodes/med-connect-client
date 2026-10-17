@@ -37,7 +37,17 @@ interface AuthContextValue {
     phone?: string;
     countryCode?: string;
   }) => Promise<User>;
-
+  googleAuth: (data: {
+    idToken: string;
+    role?: Role;
+    name?: string;
+    phone?: string;
+    countryCode?: string;
+    pharmacyName?: string;
+    address?: string;
+    longitude?: number;
+    latitude?: number;
+  }) => Promise<User>;
   registerPharmacy: (data: {
     name: string;
     email: string;
@@ -164,7 +174,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     [persistAuth],
   );
-
+  const googleAuth = useCallback(
+    async (data: {
+      idToken: string;
+      role?: Role;
+      name?: string;
+      phone?: string;
+      countryCode?: string;
+      pharmacyName?: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+    }) => {
+      const res = await api.googleAuth(data);
+      return persistAuth(res);
+    },
+    [persistAuth],
+  );
   const registerPatient = useCallback(
     async (data: {
       name: string;
@@ -268,6 +294,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     registerPatient,
     registerPharmacy,
     requestOtp,
+    googleAuth,
     verifyOtp,
     openRequestCount,
     setOpenRequestCount,

@@ -2,7 +2,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
-
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 const COLORS = {
   inactive: "#9aa0a6",
   barBg: "#ffffff",
@@ -22,7 +22,7 @@ const TAB_COLORS = {
 export default function AppTabs() {
   const { isGuest, isPharmacy, isLoading, openRequestCount } = useAuth();
   const router = useRouter();
-
+  const insets = useSafeAreaInsets();
   const roleKey = isLoading
     ? "loading"
     : isPharmacy
@@ -56,8 +56,8 @@ export default function AppTabs() {
           backgroundColor: COLORS.barBg,
           borderTopColor: COLORS.border,
           borderTopWidth: 1,
-          height: 62,
-          paddingBottom: 6,
+          height: 62 + insets.bottom,
+          paddingBottom: 6 + insets.bottom,
           paddingTop: 6,
         },
         tabBarLabelStyle: {

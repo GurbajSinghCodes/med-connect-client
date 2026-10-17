@@ -1,7 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -12,6 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { SkeletonList } from "../components/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 const POLL_INTERVAL_MS = 5000;
@@ -90,13 +90,8 @@ export default function MyRequestsScreen() {
       },
     ]);
   };
-
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
+    return <SkeletonList count={3} />;
   }
 
   return (
@@ -220,7 +215,25 @@ function RequestCard({
       {request.description ? (
         <Text style={styles.description}>{request.description}</Text>
       ) : null}
-
+      {/* Flag warning banner */}
+      {request.needsReupload ? (
+        <View style={styles.flagBannerDanger}>
+          <Text style={styles.flagBannerTitle}>
+            ⚠ Prescription flagged by pharmacies
+          </Text>
+          <Text style={styles.flagBannerText}>
+            Reupload a clearer photo to keep this request active. Tap for
+            details.
+          </Text>
+        </View>
+      ) : request.flaggedBy && request.flaggedBy.length > 0 ? (
+        <View style={styles.flagBannerWarn}>
+          <Text style={styles.flagBannerTitleWarn}>
+            ⚠ {request.flaggedBy.length} pharmac
+            {request.flaggedBy.length === 1 ? "y" : "ies"} flagged this
+          </Text>
+        </View>
+      ) : null}
       {hasImages && (
         <View style={styles.imageStrip}>
           {request.prescriptionImages!.map((url, i) => (
@@ -302,19 +315,23 @@ function RequestCard({
 }
 
 // ---------- Helpers ----------
-
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(diff / 1000);
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = now - then;
+  if (isNaN(then)) return "unknown";
+  const absDiff = Math.abs(diff);
+  const sec = Math.floor(absDiff / 1000);
   if (sec < 60) return "just now";
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} min ago`;
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr} hr ago`;
   const days = Math.floor(hr / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
 }
-
 // ---------- Styles ----------
 
 const styles = StyleSheet.create({
@@ -455,4 +472,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   modalCloseText: { color: "#000", fontWeight: "700", fontSize: 15 },
+  flagBannerDanger: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fef2f1",
+    borderWidth: 1,
+    borderColor: "#f5b8b3",
+  },
+  flagBannerTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#c8372d",
+    letterSpacing: -0.2,
+  },
+  flagBannerText: {
+    fontSize: 12,
+    color: "#8a1f17",
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  flagBannerWarn: {
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: "#fef7ed",
+    borderWidth: 1,
+    borderColor: "#f0d5a8",
+  },
+  flagBannerTitleWarn: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#b45309",
+  },
 });
