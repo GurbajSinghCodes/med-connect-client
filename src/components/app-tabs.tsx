@@ -207,6 +207,9 @@ export default function AppTabs() {
       <Tabs.Screen name="pharmacies/[id]" options={{ href: null }} />
       <Tabs.Screen name="requests/[id]" options={{ href: null }} />
       <Tabs.Screen name="forgot-password" options={{ href: null }} />
+      {/* Hidden routes — not shown as tabs, but routable */}
+      <Tabs.Screen name="privacy" options={{ href: null }} />
+      <Tabs.Screen name="terms" options={{ href: null }} />
     </Tabs>
   );
 }

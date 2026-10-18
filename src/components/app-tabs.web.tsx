@@ -6,7 +6,13 @@ import {
   TabTrigger,
   TabTriggerSlotProps,
 } from "expo-router/ui";
-import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  useColorScheme,
+  View,
+} from "react-native";
 
 import { Colors, MaxContentWidth, Spacing } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
@@ -60,6 +66,34 @@ export default function AppTabs() {
               <TabButton>Login</TabButton>
             </TabTrigger>
           )}
+          <TabTrigger name="privacy" href="/privacy" asChild>
+            <Pressable
+              style={{
+                position: "absolute",
+                width: 0,
+                height: 0,
+                opacity: 0,
+                pointerEvents: "none",
+                overflow: "hidden",
+              }}
+            >
+              <Text>Privacy</Text>
+            </Pressable>
+          </TabTrigger>
+          <TabTrigger name="terms" href="/terms" asChild>
+            <Pressable
+              style={{
+                position: "absolute",
+                width: 0,
+                height: 0,
+                opacity: 0,
+                pointerEvents: "none",
+                overflow: "hidden",
+              }}
+            >
+              <Text>Terms</Text>
+            </Pressable>
+          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>

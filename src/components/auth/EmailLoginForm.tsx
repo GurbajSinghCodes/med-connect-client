@@ -13,8 +13,8 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { ApiError } from "../../lib/api";
 import { useGoogleAuth } from "../../lib/googleAuth";
+import AuthConsentNote from "../AuthConsentNote";
 import { authStyles as s } from "./styles";
-
 interface Props {
   onBack: () => void;
   initialEmail?: string;
@@ -207,6 +207,7 @@ export default function EmailLoginForm({ onBack, initialEmail }: Props) {
         <Pressable style={s.linkBtn} onPress={onBack} disabled={busy}>
           <Text style={s.linkText}>Back</Text>
         </Pressable>
+        <AuthConsentNote action="signing in" />
       </ScrollView>
     </KeyboardAvoidingView>
   );

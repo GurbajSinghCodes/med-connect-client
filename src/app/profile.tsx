@@ -11,10 +11,10 @@ import {
   TextInput,
   View,
 } from "react-native";
+import LegalLinks from "../components/LegalLinks";
 import LocationPicker from "../components/LocationPicker";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Pharmacy } from "../lib/api";
-
 export default function ProfileScreen() {
   const { user, isGuest, isPharmacy, logout, refreshUser } = useAuth();
   const router = useRouter();
@@ -284,6 +284,10 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+      </View>
+      <Text style={styles.sectionTitle}>Legal</Text>
+      <View style={styles.legalLinksBox}>
+        <LegalLinks linkColor="#007aff" fontSize={14} />
       </View>
 
       <Pressable style={styles.logoutBtn} onPress={logout}>
@@ -569,6 +573,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     backgroundColor: "#fff",
+  },
+  legalLinksBox: {
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: "#f7f8fa",
+    borderWidth: 1,
+    borderColor: "#eee",
+    alignItems: "center",
   },
   inputDisabled: {
     borderWidth: 1,

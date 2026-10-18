@@ -11,8 +11,8 @@ import {
 } from "react-native";
 import { useAuth } from "../../context/AuthContext";
 import { useGoogleAuth } from "../../lib/googleAuth";
+import AuthConsentNote from "../AuthConsentNote";
 import { authStyles as s } from "./styles";
-
 interface Props {
   onBack: () => void;
   onAccountExists: (email: string) => void;
@@ -451,6 +451,7 @@ export default function OtpRegisterForm({ onBack, onAccountExists }: Props) {
         >
           <Text style={s.linkText}>Change email</Text>
         </Pressable>
+        <AuthConsentNote action="creating an account" />
       </ScrollView>
     </KeyboardAvoidingView>
   );

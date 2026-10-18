@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useAuth } from "../../context/AuthContext";
 import { useGoogleAuth } from "../../lib/googleAuth";
+import AuthConsentNote from "../AuthConsentNote";
 import { authStyles as s } from "./styles";
 interface Props {
   onEmailLogin: () => void;
@@ -111,6 +112,7 @@ export default function LandingScreen({ onEmailLogin, onOtpRegister }: Props) {
         <Pressable style={s.linkBtn} onPress={onOtpRegister}>
           <Text style={s.linkText}>Create a new account (OTP)</Text>
         </Pressable>
+        <AuthConsentNote action="signing in" />
       </ScrollView>
     </KeyboardAvoidingView>
   );
