@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 
-const PRODUCTION_URL = "https://medconnect.hostless.app/";
+const PRODUCTION_URL = "https://medconnect.hostless.app";
 
 function resolveApiUrl(): string {
   // 1. Explicit override from .env — highest priority
