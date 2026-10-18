@@ -2,7 +2,6 @@ import { useState } from "react";
 import EmailLoginForm from "../components/auth/EmailLoginForm";
 import LandingScreen from "../components/auth/LandingScreen";
 import OtpRegisterForm from "../components/auth/OtpRegisterForm";
-
 type Mode = "landing" | "email-login" | "otp-register";
 
 export default function LoginScreen() {
