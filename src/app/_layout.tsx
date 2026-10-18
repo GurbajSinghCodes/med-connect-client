@@ -1,6 +1,7 @@
-import NotificationHandler from "@/components/NotificationHandler";
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
 import AppTabs from "@/components/app-tabs";
+import NotificationHandler from "@/components/NotificationHandler";
+import PharmacyProfileCompletion from "@/components/PharmacyProfileCompletion";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
@@ -21,10 +22,7 @@ export default function TabLayout() {
         >
           <SplashController />
           <NotificationHandler />
-          <WebFrame>
-            <AnimatedSplashOverlay />
-            <AppTabs />
-          </WebFrame>
+          <RootContent />
         </ThemeProvider>
       </AuthProvider>
     </SafeAreaProvider>
@@ -41,6 +39,31 @@ function SplashController() {
   }, [isLoading]);
 
   return null;
+}
+
+function RootContent() {
+  const { isLoading, needsPharmacyProfile, user } = useAuth();
+
+  console.log("[layout] render:", {
+    isLoading,
+    user: user?.email ?? "null",
+    role: user?.role ?? "null",
+    needsPharmacyProfile,
+  });
+
+  if (isLoading) return null;
+
+  // Only show completion if actually logged in as a pharmacy
+  if (user && user.role === "pharmacy" && needsPharmacyProfile) {
+    return <PharmacyProfileCompletion />;
+  }
+
+  return (
+    <WebFrame>
+      <AnimatedSplashOverlay />
+      <AppTabs />
+    </WebFrame>
+  );
 }
 
 function WebFrame({ children }: { children: React.ReactNode }) {
@@ -65,7 +88,7 @@ const styles = StyleSheet.create({
   webInner: {
     flex: 1,
     width: "100%",
-    maxWidth: 1960,
+    maxWidth: 1860,
     backgroundColor: "#ffffff",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 0 },

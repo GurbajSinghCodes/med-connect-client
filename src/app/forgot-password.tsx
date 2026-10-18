@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -13,15 +13,14 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../lib/api";
-
 type Stage = "email" | "reset";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { requestOtp, resetPassword } = useAuth();
-
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(params.email ?? "");
   const [stage, setStage] = useState<Stage>("email");
-  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");

@@ -23,6 +23,7 @@ import { SkeletonList } from "../components/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 import { uploadToImageKit } from "../lib/imagekit";
+
 const POLL_INTERVAL_MS = 5000;
 
 const C = {
@@ -94,7 +95,7 @@ function RequestForm() {
     setImages([]);
     setAddress("");
     setCoords(null);
-    setToastVisible(false); // was: setLastRequestId(null)
+    setToastVisible(false);
     if (!user) setPhone("");
     await new Promise((r) => setTimeout(r, 400));
     setResetting(false);
@@ -224,7 +225,7 @@ function RequestForm() {
     }
     setSubmitting(true);
     try {
-      const req = await api.createRequest({
+      await api.createRequest({
         medicineName: medicineName.trim(),
         description: description.trim() || undefined,
         urgency,
@@ -235,7 +236,6 @@ function RequestForm() {
         contactCountryCode: user?.countryCode || "+91",
       });
 
-      // Optimistically bump the badge — the request is now open
       setOpenRequestCount((n) => n + 1);
 
       showToast();
@@ -278,7 +278,6 @@ function RequestForm() {
             </Text>
           </View>
 
-          {/* Medicine name */}
           <Text style={s.fieldLabel}>Medicine</Text>
           <TextInput
             style={s.fieldInput}
@@ -289,7 +288,6 @@ function RequestForm() {
             editable={!submitting}
           />
 
-          {/* Notes */}
           <Text style={s.fieldLabel}>Notes</Text>
           <TextInput
             style={[s.fieldInput, s.fieldMultiline]}
@@ -302,7 +300,6 @@ function RequestForm() {
             editable={!submitting}
           />
 
-          {/* Prescription */}
           <Text style={s.fieldLabel}>Prescription</Text>
           <Text style={s.fieldHint}>
             Photo of a doctor's note works too — name not required if you
@@ -341,7 +338,6 @@ function RequestForm() {
             </Pressable>
           </View>
 
-          {/* Urgency segmented control */}
           <Text style={s.fieldLabel}>Priority</Text>
           <View style={s.segment}>
             <Pressable
@@ -380,7 +376,6 @@ function RequestForm() {
             </Pressable>
           </View>
 
-          {/* Phone */}
           <Text style={s.fieldLabel}>Your phone *</Text>
           <View style={s.phoneField}>
             <Text style={s.phonePrefix}>+91</Text>
@@ -400,7 +395,6 @@ function RequestForm() {
             Pharmacies will call this number if they have your medicine.
           </Text>
 
-          {/* Location */}
           <Text style={s.fieldLabel}>Pickup location</Text>
           <Pressable
             style={[s.locationBtn, (submitting || locating) && s.btnDisabled]}
@@ -476,6 +470,7 @@ function IncomingRequests() {
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const { setOpenRequestCount } = useAuth();
+
   const fetchRequests = useCallback(async () => {
     try {
       setError(null);
@@ -582,24 +577,22 @@ function IncomingCard({
   busy: boolean;
   onAvailable: () => void;
 }) {
-  const handleFlag = () => {
-    Alert.alert("Flag prescription", "Why is this unclear?", [
-      { text: "Unreadable", onPress: () => doFlag("unreadable") },
-      { text: "Not a prescription", onPress: () => doFlag("not_prescription") },
-      { text: "Irrelevant", onPress: () => doFlag("irrelevant") },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  };
+  const [flagOpen, setFlagOpen] = useState(false);
+  const [flagBusy, setFlagBusy] = useState<string | null>(null);
+  const [flagError, setFlagError] = useState<string | null>(null);
+  const [flagged, setFlagged] = useState(false);
 
   const doFlag = async (reason: string) => {
+    setFlagBusy(reason);
+    setFlagError(null);
     try {
       await api.flagRequest(request._id, reason);
-      Alert.alert(
-        "Flagged",
-        "The patient will be asked to reupload if enough pharmacies agree.",
-      );
+      setFlagged(true);
+      setFlagOpen(false);
     } catch (err: any) {
-      Alert.alert("Error", err.message || "Could not flag");
+      setFlagError(err?.message || "Could not flag");
+    } finally {
+      setFlagBusy(null);
     }
   };
 
@@ -661,6 +654,82 @@ function IncomingCard({
           </Pressable>
         )}
 
+        {/* Inline flag picker — replaces Alert.alert */}
+        {flagOpen && (
+          <View style={s.flagPickerBox}>
+            <Text style={s.flagPickerTitle}>Why is this unclear?</Text>
+
+            <View style={s.flagReasonRow}>
+              <Pressable
+                style={[
+                  s.flagReasonBtn,
+                  flagBusy === "unreadable" && s.btnDisabled,
+                ]}
+                onPress={() => doFlag("unreadable")}
+                disabled={!!flagBusy}
+              >
+                {flagBusy === "unreadable" ? (
+                  <ActivityIndicator size="small" color={C.accent} />
+                ) : (
+                  <Text style={s.flagReasonText}>Unreadable</Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                style={[
+                  s.flagReasonBtn,
+                  flagBusy === "not_prescription" && s.btnDisabled,
+                ]}
+                onPress={() => doFlag("not_prescription")}
+                disabled={!!flagBusy}
+              >
+                {flagBusy === "not_prescription" ? (
+                  <ActivityIndicator size="small" color={C.accent} />
+                ) : (
+                  <Text style={s.flagReasonText}>Not a prescription</Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                style={[
+                  s.flagReasonBtn,
+                  flagBusy === "irrelevant" && s.btnDisabled,
+                ]}
+                onPress={() => doFlag("irrelevant")}
+                disabled={!!flagBusy}
+              >
+                {flagBusy === "irrelevant" ? (
+                  <ActivityIndicator size="small" color={C.accent} />
+                ) : (
+                  <Text style={s.flagReasonText}>Irrelevant</Text>
+                )}
+              </Pressable>
+            </View>
+
+            {flagError && <Text style={s.flagErrorText}>{flagError}</Text>}
+
+            <Pressable
+              style={s.flagCancelBtn}
+              onPress={() => {
+                setFlagOpen(false);
+                setFlagError(null);
+              }}
+              disabled={!!flagBusy}
+            >
+              <Text style={s.flagCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {flagged && !flagOpen && (
+          <View style={s.flagSuccessBox}>
+            <Text style={s.flagSuccessText}>
+              ✓ Flagged. Patient will be asked to reupload if enough pharmacies
+              agree.
+            </Text>
+          </View>
+        )}
+
         <View style={s.cardActions}>
           <Pressable
             style={[s.primaryAction, busy && s.btnDisabled]}
@@ -674,11 +743,14 @@ function IncomingCard({
             )}
           </Pressable>
 
-          {hasImages && (
+          {hasImages && !flagged && (
             <Pressable
-              style={[s.secondaryAction, busy && s.btnDisabled]}
-              onPress={handleFlag}
-              disabled={busy}
+              style={[s.secondaryAction, (busy || flagOpen) && s.btnDisabled]}
+              onPress={() => {
+                setFlagOpen(true);
+                setFlagError(null);
+              }}
+              disabled={busy || flagOpen}
             >
               <Text style={s.secondaryActionText}>Flag</Text>
             </Pressable>
@@ -733,7 +805,6 @@ const s = StyleSheet.create({
     backgroundColor: C.mist,
   },
 
-  // ---- Request form ----
   formScroll: {
     padding: 16,
     paddingTop: 48,
@@ -794,7 +865,6 @@ const s = StyleSheet.create({
     paddingTop: 12,
   },
 
-  // Image picker — full-width, tappable, clearly readable
   imageRow: {
     gap: 10,
     marginTop: 4,
@@ -861,22 +931,7 @@ const s = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.2,
   },
-  imageCountPill: {
-    marginTop: 8,
-    alignSelf: "flex-start",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: C.signalSoft,
-  },
-  imageCountText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: C.signal,
-    letterSpacing: 0.3,
-  },
 
-  // Segmented control
   segment: {
     flexDirection: "row",
     backgroundColor: C.lineFaint,
@@ -913,7 +968,6 @@ const s = StyleSheet.create({
   },
   segmentTextActive: { color: C.ink },
 
-  // Phone
   phoneField: {
     flexDirection: "row",
     alignItems: "center",
@@ -942,7 +996,6 @@ const s = StyleSheet.create({
     height: "100%",
   },
 
-  // Location
   locationBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -989,7 +1042,6 @@ const s = StyleSheet.create({
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
 
-  // Submit
   submitBtn: {
     backgroundColor: C.accent,
     paddingVertical: 15,
@@ -1010,43 +1062,6 @@ const s = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  successCard: {
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: C.signalSoft,
-    borderWidth: 1.5,
-    borderColor: "#a7e3c7",
-  },
-  successKicker: {
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    color: C.signal,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  successTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: C.ink,
-    letterSpacing: -0.2,
-  },
-  successId: {
-    fontSize: 12,
-    color: C.signal,
-    marginTop: 4,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontWeight: "700",
-  },
-  successHint: {
-    fontSize: 12,
-    color: C.signal,
-    marginTop: 6,
-    lineHeight: 17,
-  },
-
-  // ---- Pharmacy list ----
   list: { padding: 16, paddingTop: 48, paddingBottom: 40, gap: 12 },
   emptyList: { flexGrow: 1, backgroundColor: C.mist },
 
@@ -1097,7 +1112,6 @@ const s = StyleSheet.create({
     maxWidth: 260,
   },
 
-  // Request card
   requestCard: {
     backgroundColor: C.paper,
     borderRadius: 16,
@@ -1153,7 +1167,6 @@ const s = StyleSheet.create({
   },
   metaDot: { color: C.muted, fontSize: 13 },
 
-  // Pharmacy-side prescription previews
   thumbStrip: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1189,6 +1202,72 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: C.accent,
     letterSpacing: 0.4,
+  },
+
+  // Inline flag picker
+  flagPickerBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: C.warningSoft,
+    borderWidth: 1.5,
+    borderColor: "#f0d5a8",
+    gap: 10,
+  },
+  flagPickerTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: C.warning,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  flagReasonRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  flagReasonBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#f0d5a8",
+    minWidth: 100,
+    alignItems: "center",
+  },
+  flagReasonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: C.warning,
+  },
+  flagErrorText: {
+    fontSize: 12,
+    color: C.accent,
+    fontWeight: "600",
+  },
+  flagCancelBtn: {
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  flagCancelText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: C.slate,
+  },
+  flagSuccessBox: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: C.signalSoft,
+    borderWidth: 1,
+    borderColor: "#a7e3c7",
+  },
+  flagSuccessText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: C.signal,
+    lineHeight: 17,
   },
 
   cardActions: {
