@@ -24,7 +24,7 @@ import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 import { uploadToImageKit } from "../lib/imagekit";
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 15000;
 
 const C = {
   ink: "#0f1419",

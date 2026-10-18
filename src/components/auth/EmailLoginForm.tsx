@@ -14,13 +14,15 @@ import { useAuth } from "../../context/AuthContext";
 import { ApiError } from "../../lib/api";
 import { useGoogleAuth } from "../../lib/googleAuth";
 import AuthConsentNote from "../AuthConsentNote";
-import { authStyles as s } from "./styles";
+import { useAuthStyles } from "./styles";
+
 interface Props {
   onBack: () => void;
   initialEmail?: string;
 }
 
 export default function EmailLoginForm({ onBack, initialEmail }: Props) {
+  const s = useAuthStyles();
   const { login, googleAuth } = useAuth();
   const { request, response, promptAsync } = useGoogleAuth();
   const router = useRouter();

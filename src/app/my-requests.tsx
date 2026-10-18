@@ -1,10 +1,11 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Alert,
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -14,7 +15,7 @@ import {
 import { SkeletonList } from "../components/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 30000;
 export default function MyRequestsScreen() {
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,18 +35,19 @@ export default function MyRequestsScreen() {
       setError(msg);
     }
   }, [setOpenRequestCount]);
-  useEffect(() => {
-    (async () => {
-      await fetchRequests();
-      setLoading(false);
-    })();
-  }, [fetchRequests]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchRequests();
+      let active = true;
+      (async () => {
+        await fetchRequests();
+        if (active) setLoading(false);
+      })();
       const id = setInterval(fetchRequests, POLL_INTERVAL_MS);
-      return () => clearInterval(id);
+      return () => {
+        active = false;
+        clearInterval(id);
+      };
     }, [fetchRequests]),
   );
 
@@ -70,26 +72,35 @@ export default function MyRequestsScreen() {
   };
 
   const handleCancel = (requestId: string) => {
+    const doCancel = async () => {
+      setActingOn(requestId);
+      try {
+        await api.cancelRequest(requestId);
+        await fetchRequests();
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : "Cancel failed";
+        if (Platform.OS === "web") window.alert(msg);
+        else Alert.alert("Error", msg);
+      } finally {
+        setActingOn(null);
+      }
+    };
+
+    if (Platform.OS === "web") {
+      if (
+        window.confirm("Cancel request? Pharmacies will stop being notified.")
+      ) {
+        doCancel();
+      }
+      return;
+    }
+
     Alert.alert("Cancel request?", "Pharmacies will stop being notified.", [
       { text: "Keep it", style: "cancel" },
-      {
-        text: "Cancel request",
-        style: "destructive",
-        onPress: async () => {
-          setActingOn(requestId);
-          try {
-            await api.cancelRequest(requestId);
-            await fetchRequests();
-          } catch (err) {
-            const msg = err instanceof ApiError ? err.message : "Cancel failed";
-            Alert.alert("Error", msg);
-          } finally {
-            setActingOn(null);
-          }
-        },
-      },
+      { text: "Cancel request", style: "destructive", onPress: doCancel },
     ]);
   };
+
   if (loading) {
     return <SkeletonList count={3} />;
   }

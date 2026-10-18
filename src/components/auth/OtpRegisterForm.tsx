@@ -12,7 +12,8 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useGoogleAuth } from "../../lib/googleAuth";
 import AuthConsentNote from "../AuthConsentNote";
-import { authStyles as s } from "./styles";
+import { useAuthStyles } from "./styles";
+
 interface Props {
   onBack: () => void;
   onAccountExists: (email: string) => void;
@@ -57,6 +58,8 @@ interface AccountExists {
 }
 
 export default function OtpRegisterForm({ onBack, onAccountExists }: Props) {
+  const s = useAuthStyles();
+
   const { requestOtp, verifyOtp, googleAuth } = useAuth();
   const { cooldown, start: startCooldown } = useResendCooldown();
 

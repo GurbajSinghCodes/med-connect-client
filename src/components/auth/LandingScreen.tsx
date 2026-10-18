@@ -12,13 +12,14 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useGoogleAuth } from "../../lib/googleAuth";
 import AuthConsentNote from "../AuthConsentNote";
-import { authStyles as s } from "./styles";
+import { useAuthStyles } from "./styles";
 interface Props {
   onEmailLogin: () => void;
   onOtpRegister: () => void;
 }
 
 export default function LandingScreen({ onEmailLogin, onOtpRegister }: Props) {
+  const s = useAuthStyles();
   const { googleAuth } = useAuth();
   const { request, response, promptAsync } = useGoogleAuth();
   const [busy, setBusy] = useState(false);

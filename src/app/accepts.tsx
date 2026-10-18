@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SkeletonList } from "../components/Skeleton";
 import { api, ApiError, type Request } from "../lib/api";
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 15000;
 
 export default function AcceptsScreen() {
   const [requests, setRequests] = useState<Request[]>([]);

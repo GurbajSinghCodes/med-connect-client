@@ -11,7 +11,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Request } from "../lib/api";
 
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 60000;
 
 type AlertItem = {
   id: string;

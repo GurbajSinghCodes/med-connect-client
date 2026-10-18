@@ -1,8 +1,207 @@
-import { StyleSheet } from "react-native";
+import { useMemo } from "react";
+import { StyleSheet, useWindowDimensions } from "react-native";
 
+const MOBILE_BREAKPOINT = 768;
+const COMPACT_BREAKPOINT = 400;
+
+export function useAuthStyles() {
+  const { width } = useWindowDimensions();
+  const isMobile = width < MOBILE_BREAKPOINT;
+  const isCompact = width < COMPACT_BREAKPOINT;
+
+  return useMemo(
+    () =>
+      StyleSheet.create({
+        flex: { flex: 1 },
+        container: {
+          padding: isCompact ? 14 : isMobile ? 20 : 24,
+          paddingTop: isCompact ? 24 : isMobile ? 40 : 60,
+          paddingBottom: isCompact ? 20 : 24,
+          gap: isCompact ? 2 : 6,
+        },
+        title: {
+          fontSize: isCompact ? 20 : isMobile ? 24 : 26,
+          fontWeight: "700",
+        },
+        subtitle: {
+          fontSize: isCompact ? 12 : 14,
+          color: "#666",
+          marginBottom: isCompact ? 10 : 16,
+        },
+        label: {
+          fontSize: isCompact ? 12 : 13,
+          fontWeight: "600",
+          color: "#444",
+          marginTop: isCompact ? 8 : 12,
+        },
+        input: {
+          borderWidth: 1,
+          borderColor: "#ddd",
+          borderRadius: 8,
+          paddingHorizontal: 12,
+          paddingVertical: isCompact ? 8 : 10,
+          fontSize: isCompact ? 14 : 15,
+          backgroundColor: "#fff",
+        },
+        codeInput: {
+          fontSize: isCompact ? 18 : 22,
+          letterSpacing: 6,
+          textAlign: "center",
+          fontWeight: "700",
+        },
+        phoneContainer: {
+          flexDirection: "row",
+          alignItems: "center",
+          borderWidth: 1,
+          borderColor: "#ddd",
+          borderRadius: 8,
+          backgroundColor: "#fff",
+          paddingHorizontal: 12,
+        },
+        phonePrefix: {
+          fontSize: isCompact ? 14 : 15,
+          color: "#444",
+          fontWeight: "600",
+          marginRight: 6,
+        },
+        phoneInput: {
+          flex: 1,
+          paddingVertical: isCompact ? 8 : 10,
+          fontSize: isCompact ? 14 : 15,
+          color: "#000",
+        },
+        primaryBtn: {
+          backgroundColor: "#007aff",
+          paddingVertical: isCompact ? 10 : isMobile ? 12 : 14,
+          borderRadius: 8,
+          alignItems: "center",
+          marginTop: isCompact ? 14 : 24,
+        },
+        btnDisabled: { opacity: 0.6 },
+        primaryText: {
+          color: "#fff",
+          fontSize: isCompact ? 14 : 16,
+          fontWeight: "700",
+        },
+        linkBtn: {
+          paddingVertical: isCompact ? 7 : 12,
+          alignItems: "center",
+        },
+        linkText: {
+          color: "#007aff",
+          fontSize: isCompact ? 12 : 14,
+          fontWeight: "600",
+        },
+        resendBtn: {
+          paddingVertical: isCompact ? 6 : 10,
+          alignItems: "center",
+        },
+        resendText: {
+          color: "#007aff",
+          fontSize: isCompact ? 11 : 13,
+          fontWeight: "600",
+        },
+        divider: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          marginTop: isCompact ? 10 : 20,
+          marginBottom: 4,
+        },
+        dividerLine: { flex: 1, height: 1, backgroundColor: "#e0e0e0" },
+        dividerText: {
+          fontSize: isCompact ? 10 : 12,
+          color: "#999",
+          fontWeight: "700",
+        },
+        googleBtn: {
+          paddingVertical: isCompact ? 9 : 14,
+          borderRadius: 8,
+          backgroundColor: "#fff",
+          borderWidth: 1.5,
+          borderColor: "#ddd",
+          alignItems: "center",
+          marginTop: 8,
+        },
+        googleBtnText: {
+          color: "#333",
+          fontWeight: "700",
+          fontSize: isCompact ? 13 : 15,
+        },
+        pharmacyNotice: {
+          fontSize: isCompact ? 11 : 13,
+          color: "#8a1f17",
+          backgroundColor: "#fef2f1",
+          borderWidth: 1,
+          borderColor: "#f5b8b3",
+          padding: isCompact ? 10 : 12,
+          borderRadius: 8,
+          marginBottom: isCompact ? 12 : 20,
+          lineHeight: isCompact ? 15 : 18,
+          marginTop: 10,
+        },
+        banner: {
+          marginTop: isCompact ? 8 : 12,
+          marginBottom: isCompact ? 8 : 12,
+          padding: isCompact ? 10 : 14,
+          borderRadius: 10,
+          gap: 8,
+          borderWidth: 1,
+        },
+        bannerError: {
+          backgroundColor: "#fef2f1",
+          borderColor: "#f5b8b3",
+        },
+        bannerWarning: {
+          backgroundColor: "#fef7ed",
+          borderColor: "#f0d5a8",
+        },
+        bannerSuccess: {
+          backgroundColor: "#ecfdf5",
+          borderColor: "#a7e3c7",
+        },
+        bannerTitle: { fontSize: isCompact ? 12 : 14, fontWeight: "800" },
+        bannerTitleError: { color: "#c8372d" },
+        bannerTitleWarning: { color: "#b45309" },
+        bannerTitleSuccess: { color: "#1a7f5a" },
+        bannerText: {
+          fontSize: isCompact ? 11 : 13,
+          lineHeight: isCompact ? 16 : 18,
+        },
+        bannerTextError: { color: "#8a1f17" },
+        bannerTextWarning: { color: "#8a5c0f" },
+        bannerTextSuccess: { color: "#155f43" },
+        bannerActionBtn: {
+          marginTop: 4,
+          paddingVertical: isCompact ? 8 : 10,
+          paddingHorizontal: 14,
+          borderRadius: 8,
+          alignSelf: "flex-start",
+          backgroundColor: "#fff",
+          borderWidth: 1.5,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+        },
+        bannerActionBtnWarning: { borderColor: "#b45309" },
+        bannerActionBtnError: { borderColor: "#c8372d" },
+        bannerActionText: {
+          fontSize: isCompact ? 12 : 13,
+          fontWeight: "700",
+        },
+        bannerActionTextWarning: { color: "#b45309" },
+        bannerActionTextError: { color: "#c8372d" },
+      }),
+    [isMobile, isCompact],
+  );
+}
+
+// Backward-compat export — anything still doing `import { authStyles as s }`
+// gets a plain desktop-sized stylesheet. All three auth components should
+// switch to `useAuthStyles()` (see below).
 export const authStyles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { padding: 24, paddingTop: 60, gap: 6, textAlign: "center" },
+  container: { padding: 24, paddingTop: 60, paddingBottom: 24, gap: 6 },
   title: { fontSize: 26, fontWeight: "700" },
   subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
   label: { fontSize: 13, fontWeight: "600", color: "#444", marginTop: 12 },
@@ -43,17 +242,10 @@ export const authStyles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     marginTop: 24,
-    margin: "auto",
-    padding: 50,
   },
   btnDisabled: { opacity: 0.6 },
   primaryText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  linkBtn: {
-    paddingVertical: 12,
-    alignItems: "center",
-    margin: "auto",
-    padding: 50,
-  },
+  linkBtn: { paddingVertical: 12, alignItems: "center" },
   linkText: { color: "#007aff", fontSize: 14, fontWeight: "600" },
   resendBtn: { paddingVertical: 10, alignItems: "center" },
   resendText: { color: "#007aff", fontSize: 13, fontWeight: "600" },
@@ -74,15 +266,8 @@ export const authStyles = StyleSheet.create({
     borderColor: "#ddd",
     alignItems: "center",
     marginTop: 8,
-    margin: "auto",
-    padding: 20,
   },
-  googleBtnText: {
-    color: "#333",
-    fontWeight: "700",
-    fontSize: 15,
-    marginBottom: 3,
-  },
+  googleBtnText: { color: "#333", fontWeight: "700", fontSize: 15 },
   pharmacyNotice: {
     fontSize: 13,
     color: "#8a1f17",
@@ -102,30 +287,14 @@ export const authStyles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
   },
-  bannerError: {
-    backgroundColor: "#fef2f1",
-    borderColor: "#f5b8b3",
-  },
-  bannerWarning: {
-    backgroundColor: "#fef7ed",
-    borderColor: "#f0d5a8",
-  },
-  bannerSuccess: {
-    backgroundColor: "#ecfdf5",
-    borderColor: "#a7e3c7",
-  },
-  bannerTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: -0.2,
-  },
+  bannerError: { backgroundColor: "#fef2f1", borderColor: "#f5b8b3" },
+  bannerWarning: { backgroundColor: "#fef7ed", borderColor: "#f0d5a8" },
+  bannerSuccess: { backgroundColor: "#ecfdf5", borderColor: "#a7e3c7" },
+  bannerTitle: { fontSize: 14, fontWeight: "800" },
   bannerTitleError: { color: "#c8372d" },
   bannerTitleWarning: { color: "#b45309" },
   bannerTitleSuccess: { color: "#1a7f5a" },
-  bannerText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
+  bannerText: { fontSize: 13, lineHeight: 18 },
   bannerTextError: { color: "#8a1f17" },
   bannerTextWarning: { color: "#8a5c0f" },
   bannerTextSuccess: { color: "#155f43" },
@@ -137,13 +306,13 @@ export const authStyles = StyleSheet.create({
     alignSelf: "flex-start",
     backgroundColor: "#fff",
     borderWidth: 1.5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   bannerActionBtnWarning: { borderColor: "#b45309" },
   bannerActionBtnError: { borderColor: "#c8372d" },
-  bannerActionText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  bannerActionText: { fontSize: 13, fontWeight: "700" },
   bannerActionTextWarning: { color: "#b45309" },
   bannerActionTextError: { color: "#c8372d" },
 });

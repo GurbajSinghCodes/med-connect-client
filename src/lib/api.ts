@@ -77,6 +77,7 @@ export interface Request {
     address: string;
     location?: { type: "Point"; coordinates: [number, number] };
   };
+  fulfilledAt?: string;
   fulfilledByDistance?: number;
   contactPhone?: string;
   contactCountryCode?: string;
